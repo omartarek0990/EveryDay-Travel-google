@@ -1,0 +1,71 @@
+{
+  "nav": {
+    "home": "الرئيسية",
+    "trips": "الرحلات",
+    "gallery": "معرض الصور",
+    "about": "من نحن",
+    "contact": "تواصل معنا"
+  },
+  "actions": {
+    "askAboutTrip": "اسأل عن الرحلة",
+    "exploreTrips": "استكشف الرحلات",
+    "contactUs": "تواصل معنا",
+    "viewAllTrips": "عرض كل الرحلات",
+    "showMore": "عرض المزيد",
+    "all": "الكل",
+    "openInMaps": "افتح في الخرائط",
+    "callUs": "اتصل بنا",
+    "whatsappUs": "راسلنا على واتساب",
+    "emailUs": "راسلنا عبر البريد",
+    "backHome": "العودة للرئيسية",
+    "close": "إغلاق",
+    "previous": "السابق",
+    "next": "التالي",
+    "menu": "القائمة"
+  },
+  "trip": {
+    "itinerary": "برنامج الرحلة",
+    "dayLabel": "اليوم",
+    "optionalActivities": "أنشطة اختيارية",
+    "free": "مجاني",
+    "extraCost": "بمصاريف إضافية",
+    "startingFrom": "ابتداءً من",
+    "perPerson": "للفرد",
+    "perTrip": "للرحلة",
+    "duration": "المدة",
+    "destination": "الوجهة",
+    "similarTrips": "رحلات مشابهة",
+    "contactForPrice": "تواصل لمعرفة السعر",
+    "noTripsYet": "لا توجد رحلات بعد",
+    "noTripsInDest": "لا توجد رحلات متاحة لهذه الوجهة حالياً.",
+    "featuresTitle": "تشمل الرحلة",
+    "detailsTitle": "تفاصيل الرحلة"
+  },
+  "sections": {
+    "latestTrips": "أحدث الرحلات",
+    "whyEveryDay": "لماذا everyDay",
+    "galleryPreview": "معرض الصور",
+    "viewGallery": "عرض كل الصور",
+    "readyToTravel": "جاهز لرحلتك القادمة؟"
+  },
+  "contact": {
+    "phoneLabel": "الهاتف",
+    "whatsappLabel": "واتساب",
+    "emailLabel": "البريد الإلكتروني",
+    "addressLabel": "العنوان",
+    "socialLabel": "تابعنا",
+    "noContactDetails": "سيتم إضافة بيانات التواصل قريباً."
+  },
+  "notFound": {
+    "title": "الصفحة غير موجودة",
+    "description": "يبدو أن الرابط الذي تبحث عنه غير متاح أو تم نقله."
+  },
+  "empty": {
+    "gallery": "لا توجد صور في المعرض بعد."
+  },
+  "footer": {
+    "quickLinks": "روابط سريعة",
+    "contactInfo": "تواصل معنا",
+    "rights": "جميع الحقوق محفوظة"
+  }
+}

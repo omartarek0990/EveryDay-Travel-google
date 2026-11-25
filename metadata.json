@@ -1,0 +1,8 @@
+{
+  "name": "everyDay Travel Agency",
+  "description": "everyDay Travel Agency — curated domestic trips across Egypt with day-by-day programs, Arabic & English showcase, and owner management dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
