@@ -48,6 +48,16 @@
     "viewGallery": "View full gallery",
     "readyToTravel": "Ready for your next trip?"
   },
+  "aboutHighlights": {
+    "teamTitle": "Professional Team",
+    "teamBody": "Our qualified and trained team is dedicated to delivering the best service for every traveler.",
+    "destinationsTitle": "All Tourist Destinations",
+    "destinationsBody": "We cover Egypt's finest coastal, desert, and cultural destinations across our curated programs.",
+    "hotelsTitle": "Luxury Hotels",
+    "hotelsBody": "All our partnerships are with high-standard hotels and resorts chosen for your comfort.",
+    "transportTitle": "Tourist Transport",
+    "transportBody": "Top-tier tourist transportation with modern, air-conditioned coaches and vehicles."
+  },
   "contact": {
     "phoneLabel": "Phone",
     "whatsappLabel": "WhatsApp",

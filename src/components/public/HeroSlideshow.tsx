@@ -1,11 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { ArrowRight, Check, MapPin } from 'lucide-react';
+import { Check, MapPin } from 'lucide-react';
 import { useI18n } from '../I18nProvider';
-import { buildWhatsAppUrl } from '../../shared/format';
 import type { HeroImageRecord, SiteSettings } from '../../shared/types';
 import { ResilientImage } from '../ResilientImage';
-import { WhatsAppIcon } from './WhatsAppIcon';
 
 export function HeroSlideshow({
   settings,
@@ -14,7 +11,7 @@ export function HeroSlideshow({
   settings: SiteSettings;
   heroImages: HeroImageRecord[];
 }) {
-  const { locale, dir, messages, t } = useI18n();
+  const { dir, t } = useI18n();
   const [activeIdx, setActiveIdx] = useState(0);
   const [prevIdx, setPrevIdx] = useState<number | null>(null);
   const [transitionMode, setTransitionMode] = useState<'fade' | 'slide'>('fade');
@@ -73,16 +70,6 @@ export function HeroSlideshow({
   const heroSubtitle = t(settings.heroSubtitle);
   const heroDescription = t(settings.heroDescription);
 
-  const pageUrl = typeof window !== 'undefined' ? window.location.href : '';
-  const whatsappUrl = settings.whatsapp
-    ? buildWhatsAppUrl(
-        settings.whatsapp,
-        t(settings.whatsappMessage).text,
-        t(settings.companyName).text,
-        pageUrl
-      )
-    : null;
-
   const activeImage = heroImages[activeIdx]?.image;
   const prevImage = prevIdx !== null ? heroImages[prevIdx]?.image : null;
 
@@ -95,9 +82,12 @@ export function HeroSlideshow({
       : 'translate-x-0';
 
   return (
-    <section className="relative min-h-[82vh] sm:min-h-[88vh] flex items-end sm:items-center overflow-hidden bg-ink">
-      {/* Layer 1: Slideshow background */}
-      <div className="absolute inset-0 z-0">
+    <section className="relative bg-ink sm:min-h-[88vh] sm:flex sm:items-center overflow-hidden">
+      {/* Mobile spacer so fixed h-20 header sits cleanly above the 16:9 hero photo */}
+      <div className="h-20 sm:hidden" aria-hidden="true" />
+
+      {/* Layer 1: Slideshow background — full 16:9 landscape on mobile, full-bleed on sm+ */}
+      <div className="relative w-full aspect-[16/9] overflow-hidden sm:aspect-auto sm:absolute sm:inset-0 z-0">
         {prevImage && count > 1 && (
           <ResilientImage
             key={`prev-${prevImage.id}`}
@@ -131,20 +121,24 @@ export function HeroSlideshow({
         ) : (
           <div className="w-full h-full bg-gradient-to-br from-brand-700 via-brand-600 to-ink" />
         )}
+        <div
+          aria-hidden="true"
+          className="sm:hidden absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-ink to-transparent pointer-events-none"
+        />
       </div>
 
-      {/* Layer 2: Fixed Dark Scrim */}
+      {/* Layer 2: Fixed Dark Scrim (tablet & desktop full-bleed overlay) */}
       <div
         aria-hidden="true"
-        className="absolute inset-0 z-10"
+        className="hidden sm:block absolute inset-0 z-10"
         style={{
           background:
             'linear-gradient(180deg, rgba(15,10,5,0.48) 0%, rgba(15,10,5,0.58) 55%, rgba(15,10,5,0.78) 100%)',
         }}
       />
 
-      {/* Layer 3: Fixed Content (never animates) */}
-      <div className="relative z-20 w-full max-w-7xl mx-auto px-4 sm:px-6 pt-28 pb-12 sm:py-28">
+      {/* Layer 3: Fixed Content (below 16:9 photo on mobile, overlaid on sm+) */}
+      <div className="relative z-20 w-full max-w-7xl mx-auto px-4 sm:px-6 pt-5 pb-10 sm:py-28">
         <div className="max-w-2xl text-white">
           {heroBadge.text && (
             <div
@@ -184,35 +178,6 @@ export function HeroSlideshow({
               {heroDescription.text}
             </p>
           )}
-
-          <div className="mt-8 flex flex-wrap items-center gap-3.5">
-            <Link
-              to={`/${locale}/trips`}
-              className="inline-flex items-center gap-2 px-6 py-3.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-semibold text-sm sm:text-base transition-colors whitespace-nowrap shrink-0"
-            >
-              <span>{messages.actions.exploreTrips}</span>
-              <ArrowRight className="w-4 h-4 rtl:rotate-180" aria-hidden="true" />
-            </Link>
-
-            {whatsappUrl ? (
-              <a
-                href={whatsappUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-6 py-3.5 rounded-xl bg-white/15 hover:bg-white/25 backdrop-blur-sm border border-white/30 text-white font-semibold text-sm sm:text-base transition-colors whitespace-nowrap shrink-0"
-              >
-                <WhatsAppIcon className="w-4 h-4" />
-                <span>{messages.actions.contactUs}</span>
-              </a>
-            ) : (
-              <Link
-                to={`/${locale}/contact`}
-                className="inline-flex items-center gap-2 px-6 py-3.5 rounded-xl bg-white/15 hover:bg-white/25 backdrop-blur-sm border border-white/30 text-white font-semibold text-sm sm:text-base transition-colors whitespace-nowrap shrink-0"
-              >
-                <span>{messages.actions.contactUs}</span>
-              </Link>
-            )}
-          </div>
         </div>
 
         {/* Bottom 3-feature strip */}

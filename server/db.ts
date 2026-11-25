@@ -88,6 +88,39 @@ function createSeedDatabase(): DatabaseSchema {
       format: 'jpg',
       createdAt: now,
     },
+    {
+      id: 'img-hero-catherine',
+      provider: 'STATIC',
+      publicId: 'seed/hero_saint_catherine_snow',
+      url: '/src/assets/images/hero_saint_catherine_snow_1795616932524.jpg',
+      width: 1408,
+      height: 768,
+      bytes: 310000,
+      format: 'jpg',
+      createdAt: now,
+    },
+    {
+      id: 'img-hero-siwa-4x4',
+      provider: 'STATIC',
+      publicId: 'seed/hero_siwa_4x4',
+      url: '/src/assets/images/hero_siwa_4x4_1795616932838.jpg',
+      width: 1408,
+      height: 768,
+      bytes: 295000,
+      format: 'jpg',
+      createdAt: now,
+    },
+    {
+      id: 'img-hero-farsha',
+      provider: 'STATIC',
+      publicId: 'seed/hero_farsha_sharm',
+      url: '/src/assets/images/hero_farsha_sharm_1795616934669.jpg',
+      width: 1408,
+      height: 768,
+      bytes: 320000,
+      format: 'jpg',
+      createdAt: now,
+    },
   ];
 
   const siteSettings: SiteSettings = {
@@ -195,8 +228,9 @@ function createSeedDatabase(): DatabaseSchema {
   };
 
   const heroImages: HeroImageRecord[] = [
-    { id: 'hero-1', imageId: 'img-hero-dahab', sortOrder: 0 },
-    { id: 'hero-2', imageId: 'img-hero-siwa', sortOrder: 1 },
+    { id: 'hero-1', imageId: 'img-hero-catherine', sortOrder: 0 },
+    { id: 'hero-2', imageId: 'img-hero-siwa-4x4', sortOrder: 1 },
+    { id: 'hero-3', imageId: 'img-hero-farsha', sortOrder: 2 },
   ];
 
   const destinations: DestinationRecord[] = [

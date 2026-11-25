@@ -50,114 +50,140 @@ export function PublicLayout({
 
   const isTransparent = transparentHeaderOnTop && !scrolled;
 
-  const navItems = [
-    { to: `/${locale}`, label: messages.nav.home, end: true },
-    { to: `/${locale}/trips`, label: messages.nav.trips, end: false },
-    { to: `/${locale}/gallery`, label: messages.nav.gallery, end: false },
-    { to: `/${locale}/about`, label: messages.nav.about, end: false },
-    { to: `/${locale}/contact`, label: messages.nav.contact, end: false },
+  const startNavItems = [
+    { to: `/${locale}`, label: messages.nav.home, end: true, stagger: '-translate-y-2.5' },
+    { to: `/${locale}/trips`, label: messages.nav.trips, end: false, stagger: 'translate-y-2.5' },
+    { to: `/${locale}/gallery`, label: messages.nav.gallery, end: false, stagger: '-translate-y-2.5' },
   ];
+
+  const endNavItems = [
+    { to: `/${locale}/about`, label: messages.nav.about, end: false, stagger: 'translate-y-2.5' },
+    { to: `/${locale}/contact`, label: messages.nav.contact, end: false, stagger: '-translate-y-2.5' },
+  ];
+
+  const allNavItems = [...startNavItems, ...endNavItems];
+
+  const navLinkClass = (isActive: boolean, stagger: string) =>
+    `inline-flex items-center text-sm md:text-[15px] lg:text-base font-semibold whitespace-nowrap shrink-0 transition-transform duration-150 py-1 border-b-2 ${stagger} ${
+      isActive
+        ? 'text-white border-white'
+        : 'text-white/90 border-transparent hover:text-white hover:border-white/50'
+    }`;
 
   return (
     <div className="min-h-screen flex flex-col bg-surface text-ink">
-      {/* Header: strict 3-zone top bar */}
+      {/* Header: Centered Logo with staggered zigzag links clustered on both sides */}
       <header
         className={`fixed top-0 inset-x-0 z-40 transition-colors duration-200 ${
           isTransparent
-            ? 'bg-gradient-to-b from-black/55 to-transparent'
+            ? 'bg-ink sm:bg-transparent sm:bg-gradient-to-b sm:from-black/75 sm:via-black/40 sm:to-transparent'
             : 'bg-brand-600 shadow-sm'
         }`}
       >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 sm:h-[72px] flex items-center justify-between gap-8">
-          {/* Zone 1: Brand mark */}
-          <Link to={`/${locale}`} className="shrink-0 flex items-center focus-visible:outline-white">
-            <BrandLogo logoImage={settings?.logoImage} size="md" />
-          </Link>
-
-          {/* Zone 2: Desktop Nav Links */}
-          <nav className="hidden lg:flex items-center gap-6">
-            {navItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) =>
-                  `text-sm font-medium whitespace-nowrap shrink-0 transition-colors py-1 border-b-2 ${
-                    isActive
-                      ? 'text-white border-white'
-                      : 'text-white/90 border-transparent hover:text-white hover:border-white/50'
-                  }`
-                }
-              >
-                {item.label}
-              </NavLink>
-            ))}
-          </nav>
-
-          {/* Zone 3: Language Switcher + 1 Primary Action */}
-          <div className="flex items-center gap-3 shrink-0">
-            <div className="flex items-center bg-black/20 rounded-lg p-0.5 text-xs font-semibold">
-              <Link
-                to={switchLocalePath('ar')}
-                className={`px-2.5 py-1.5 rounded-md whitespace-nowrap transition-colors ${
-                  locale === 'ar'
-                    ? 'bg-white text-brand-700'
-                    : 'text-white/90 hover:text-white'
-                }`}
-              >
-                AR
-              </Link>
-              <Link
-                to={switchLocalePath('en')}
-                className={`px-2.5 py-1.5 rounded-md whitespace-nowrap transition-colors ${
-                  locale === 'en'
-                    ? 'bg-white text-brand-700'
-                    : 'text-white/90 hover:text-white'
-                }`}
-              >
-                EN
-              </Link>
-            </div>
-
-            {whatsappUrl ? (
-              <a
-                href={whatsappUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hidden sm:inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap shrink-0 bg-white text-brand-700 hover:bg-brand-100 transition-colors"
-              >
-                <WhatsAppIcon className="w-4 h-4" />
-                <span>{messages.actions.contactUs}</span>
-              </a>
-            ) : (
-              <Link
-                to={`/${locale}/contact`}
-                className="hidden sm:inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap shrink-0 bg-white text-brand-700 hover:bg-brand-100 transition-colors"
-              >
-                <span>{messages.actions.contactUs}</span>
-              </Link>
-            )}
-
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-20 md:h-24 flex items-center justify-between md:grid md:grid-cols-[1fr_auto_1fr] md:gap-7 lg:gap-11 xl:gap-14">
+          {/* Start side (hugs the centered logo on md+) */}
+          <div className="flex items-center justify-start md:justify-end min-w-0">
             <button
               type="button"
               onClick={() => setDrawerOpen(true)}
               aria-label={messages.actions.menu}
-              className="lg:hidden p-2 rounded-xl text-white hover:bg-white/15 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
+              className="md:hidden p-2 rounded-xl text-white hover:bg-white/15 transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
             >
               <Menu className="w-6 h-6" />
             </button>
+
+            <nav className="hidden md:flex items-center gap-7 lg:gap-9 xl:gap-12">
+              {startNavItems.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  className={({ isActive }) => navLinkClass(isActive, item.stagger)}
+                >
+                  {item.label}
+                </NavLink>
+              ))}
+            </nav>
+          </div>
+
+          {/* Center: Brand Logo */}
+          <Link
+            to={`/${locale}`}
+            className="justify-self-center shrink-0 flex items-center justify-center focus-visible:outline-white"
+          >
+            <BrandLogo logoImage={settings?.logoImage} size="md" />
+          </Link>
+
+          {/* End side (end nav links hugging the logo + AR/EN & CTA at far end) */}
+          <div className="flex items-center justify-end md:justify-between gap-3 lg:gap-5 min-w-0">
+            <nav className="hidden md:flex items-center gap-7 lg:gap-9 xl:gap-12">
+              {endNavItems.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  className={({ isActive }) => navLinkClass(isActive, item.stagger)}
+                >
+                  {item.label}
+                </NavLink>
+              ))}
+            </nav>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center bg-black/25 rounded-lg p-0.5 text-xs font-semibold">
+                <Link
+                  to={switchLocalePath('ar')}
+                  className={`px-2 py-1.5 rounded-md whitespace-nowrap transition-colors ${
+                    locale === 'ar'
+                      ? 'bg-white text-brand-700'
+                      : 'text-white/90 hover:text-white'
+                  }`}
+                >
+                  AR
+                </Link>
+                <Link
+                  to={switchLocalePath('en')}
+                  className={`px-2 py-1.5 rounded-md whitespace-nowrap transition-colors ${
+                    locale === 'en'
+                      ? 'bg-white text-brand-700'
+                      : 'text-white/90 hover:text-white'
+                  }`}
+                >
+                  EN
+                </Link>
+              </div>
+
+              {whatsappUrl ? (
+                <a
+                  href={whatsappUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hidden lg:inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap shrink-0 bg-white text-brand-700 hover:bg-brand-100 transition-colors"
+                >
+                  <WhatsAppIcon className="w-4 h-4" />
+                  <span>{messages.actions.contactUs}</span>
+                </a>
+              ) : (
+                <Link
+                  to={`/${locale}/contact`}
+                  className="hidden lg:inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap shrink-0 bg-white text-brand-700 hover:bg-brand-100 transition-colors"
+                >
+                  <span>{messages.actions.contactUs}</span>
+                </Link>
+              )}
+            </div>
           </div>
         </div>
       </header>
 
       {/* Mobile Navigation Drawer */}
       {drawerOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden">
+        <div className="fixed inset-0 z-50 md:hidden">
           <div
             className="fixed inset-0 bg-black/50 backdrop-blur-[2px]"
             onClick={() => setDrawerOpen(false)}
           />
-          <div className="fixed inset-y-0 end-0 w-72 max-w-[85vw] bg-brand-600 text-white p-6 flex flex-col justify-between shadow-xl">
+          <div className="fixed inset-y-0 start-0 w-72 max-w-[85vw] bg-brand-600 text-white p-6 flex flex-col justify-between shadow-xl">
             <div>
               <div className="flex items-center justify-between pb-6 border-b border-white/15">
                 <BrandLogo logoImage={settings?.logoImage} size="sm" />
@@ -171,7 +197,7 @@ export function PublicLayout({
                 </button>
               </div>
               <nav className="mt-6 flex flex-col gap-2">
-                {navItems.map((item) => (
+                {allNavItems.map((item) => (
                   <NavLink
                     key={item.to}
                     to={item.to}
@@ -213,7 +239,7 @@ export function PublicLayout({
       )}
 
       {/* Main Content */}
-      <main className={`flex-1 ${transparentHeaderOnTop ? '' : 'pt-16 sm:pt-[72px]'}`}>
+      <main className={`flex-1 ${transparentHeaderOnTop ? '' : 'pt-20 md:pt-24'}`}>
         {children}
       </main>
 
@@ -272,7 +298,7 @@ export function PublicLayout({
             <div>
               <h2 className="text-sm font-bold text-white mb-4">{messages.footer.quickLinks}</h2>
               <ul className="space-y-2.5 text-sm text-white/75">
-                {navItems.map((item) => (
+                {allNavItems.map((item) => (
                   <li key={item.to}>
                     <Link to={item.to} className="hover:text-white transition-colors">
                       {item.label}
