@@ -13,7 +13,11 @@ import type {
   TripWithRelations,
 } from '../src/shared/types.ts';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const IS_SERVERLESS_READONLY = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const BUNDLED_DB_PATH = path.resolve(process.cwd(), 'data', 'db.json');
+const DATA_DIR = IS_SERVERLESS_READONLY
+  ? path.join('/tmp', 'everyday-data')
+  : path.resolve(process.cwd(), 'data');
 const DB_PATH = path.join(DATA_DIR, 'db.json');
 
 let memoryCache: DatabaseSchema | null = null;
@@ -562,16 +566,16 @@ export function getDb(): DatabaseSchema {
   if (memoryCache) {
     return memoryCache;
   }
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-  if (fs.existsSync(DB_PATH)) {
-    try {
-      const raw = fs.readFileSync(DB_PATH, 'utf-8');
-      memoryCache = JSON.parse(raw) as DatabaseSchema;
-      return memoryCache;
-    } catch (err) {
-      console.error('Failed to read existing db.json, reinitializing seed:', err);
+  const candidatePaths = IS_SERVERLESS_READONLY ? [DB_PATH, BUNDLED_DB_PATH] : [DB_PATH];
+  for (const candidate of candidatePaths) {
+    if (fs.existsSync(candidate)) {
+      try {
+        const raw = fs.readFileSync(candidate, 'utf-8');
+        memoryCache = JSON.parse(raw) as DatabaseSchema;
+        return memoryCache;
+      } catch (err) {
+        console.error(`Failed to read db from ${candidate}:`, err);
+      }
     }
   }
   memoryCache = createSeedDatabase();
@@ -580,19 +584,23 @@ export function getDb(): DatabaseSchema {
 }
 
 export function saveDb(next: DatabaseSchema): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-  const tmpPath = path.join(DATA_DIR, `db.${crypto.randomUUID()}.tmp.json`);
-  fs.writeFileSync(tmpPath, JSON.stringify(next, null, 2), 'utf-8');
-  fs.renameSync(tmpPath, DB_PATH);
   memoryCache = next;
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const tmpPath = path.join(DATA_DIR, `db.${crypto.randomUUID()}.tmp.json`);
+    fs.writeFileSync(tmpPath, JSON.stringify(next, null, 2), 'utf-8');
+    fs.renameSync(tmpPath, DB_PATH);
+  } catch (err) {
+    console.warn('Unable to persist db.json to disk, keeping in-memory state:', err);
+  }
 }
 
 export function resetDbToSeed(): DatabaseSchema {
   const seeded = createSeedDatabase();
   // Preserve existing users & sessions when re-seeding content
-  const existing = fs.existsSync(DB_PATH) ? getDb() : null;
+  const existing = fs.existsSync(DB_PATH) || fs.existsSync(BUNDLED_DB_PATH) ? getDb() : null;
   if (existing) {
     seeded.users = existing.users;
     seeded.sessions = existing.sessions;

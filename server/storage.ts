@@ -27,7 +27,10 @@ export interface ImageStorage {
   url(image: Pick<ImageRecord, 'provider' | 'publicId' | 'url'>, opts?: { width?: number }): string;
 }
 
-const LOCAL_UPLOAD_DIR = path.resolve(process.cwd(), 'public', 'uploads');
+const IS_SERVERLESS_READONLY = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const LOCAL_UPLOAD_DIR = IS_SERVERLESS_READONLY
+  ? path.join('/tmp', 'everyday-uploads')
+  : path.resolve(process.cwd(), 'public', 'uploads');
 
 function getUploadTokenSecret(): string {
   return process.env.SESSION_SECRET || globalThis.__everydayUploadSecret || (globalThis.__everydayUploadSecret = crypto.randomBytes(32).toString('hex'));
