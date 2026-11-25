@@ -62,7 +62,7 @@ export function I18nProvider({
 
   const switchLocalePath = (target: Locale) => {
     const rest = location.pathname.replace(/^\/(ar|en)/, '') || '';
-    return `/${target}${rest}${location.search}`;
+    return `/${target}${rest}${location.search}${location.hash || ''}`;
   };
 
   const t = (field: LocalizedText | null | undefined) => resolveLocalizedText(field, locale);

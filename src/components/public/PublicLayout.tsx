@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { Link, NavLink, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Menu, X, Mail, MapPin, Phone } from 'lucide-react';
 import { BrandLogo } from '../BrandLogo';
 import { useI18n } from '../I18nProvider';
 import { usePublicData } from '../PublicDataContext';
 import { buildWhatsAppUrl, isSafeExternalHttpsUrl } from '../../shared/format';
 import { WhatsAppIcon } from './WhatsAppIcon';
+
+type SectionId = 'home' | 'trips' | 'gallery' | 'about' | 'contact';
+const SECTION_ORDER: SectionId[] = ['home', 'trips', 'gallery', 'about', 'contact'];
 
 export function PublicLayout({
   children,
@@ -19,19 +22,58 @@ export function PublicLayout({
   const { locale, messages, t, switchLocalePath } = useI18n();
   const { data } = usePublicData();
   const location = useLocation();
+  const navigate = useNavigate();
   const [scrolled, setScrolled] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState<SectionId>('home');
+
+  const isHomePage =
+    location.pathname === `/${locale}` || location.pathname === `/${locale}/`;
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 24);
+    const onScroll = () => {
+      setScrolled(window.scrollY > 24);
+      if (!isHomePage) return;
+
+      if (window.scrollY < 100) {
+        setActiveSection('home');
+        return;
+      }
+
+      const nearBottom =
+        window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 80;
+      if (nearBottom) {
+        setActiveSection('contact');
+        return;
+      }
+
+      let current: SectionId = 'home';
+      for (const id of SECTION_ORDER) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        if (el.getBoundingClientRect().top <= 160) {
+          current = id;
+        }
+      }
+      setActiveSection(current);
+    };
+
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
-  }, []);
+  }, [isHomePage]);
 
   useEffect(() => {
+    if (!isHomePage && location.pathname.includes('/trips/')) {
+      setActiveSection('trips');
+    } else if (isHomePage && location.hash) {
+      const hashId = location.hash.replace(/^#/, '') as SectionId;
+      if (SECTION_ORDER.includes(hashId)) {
+        setActiveSection(hashId);
+      }
+    }
     setDrawerOpen(false);
-  }, [location.pathname, location.search]);
+  }, [isHomePage, location.pathname, location.hash]);
 
   const settings = data?.settings;
   const companyName = settings ? t(settings.companyName) : { text: 'everyDay', isFallbackAr: false };
@@ -50,18 +92,40 @@ export function PublicLayout({
 
   const isTransparent = transparentHeaderOnTop && !scrolled;
 
-  const startNavItems = [
-    { to: `/${locale}`, label: messages.nav.home, end: true, stagger: '-translate-y-2.5' },
-    { to: `/${locale}/trips`, label: messages.nav.trips, end: false, stagger: 'translate-y-2.5' },
-    { to: `/${locale}/gallery`, label: messages.nav.gallery, end: false, stagger: '-translate-y-2.5' },
+  const startNavItems: Array<{ id: SectionId; label: string; stagger: string }> = [
+    { id: 'home', label: messages.nav.home, stagger: '-translate-y-2.5' },
+    { id: 'trips', label: messages.nav.trips, stagger: 'translate-y-2.5' },
+    { id: 'gallery', label: messages.nav.gallery, stagger: '-translate-y-2.5' },
   ];
 
-  const endNavItems = [
-    { to: `/${locale}/about`, label: messages.nav.about, end: false, stagger: 'translate-y-2.5' },
-    { to: `/${locale}/contact`, label: messages.nav.contact, end: false, stagger: '-translate-y-2.5' },
+  const endNavItems: Array<{ id: SectionId; label: string; stagger: string }> = [
+    { id: 'about', label: messages.nav.about, stagger: 'translate-y-2.5' },
+    { id: 'contact', label: messages.nav.contact, stagger: '-translate-y-2.5' },
   ];
 
   const allNavItems = [...startNavItems, ...endNavItems];
+
+  const getSectionHref = (id: SectionId) =>
+    id === 'home' ? `/${locale}` : `/${locale}#${id}`;
+
+  const handleSectionClick = (e: React.MouseEvent, id: SectionId) => {
+    setDrawerOpen(false);
+    if (!isHomePage) return;
+
+    e.preventDefault();
+    setActiveSection(id);
+    if (id === 'home') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      navigate(`/${locale}`, { replace: true });
+      return;
+    }
+
+    const target = document.getElementById(id);
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    navigate(`/${locale}#${id}`, { replace: true });
+  };
 
   const navLinkClass = (isActive: boolean, stagger: string) =>
     `inline-flex items-center text-sm md:text-[15px] lg:text-base font-semibold whitespace-nowrap shrink-0 transition-transform duration-150 py-1 border-b-2 ${stagger} ${
@@ -94,14 +158,14 @@ export function PublicLayout({
 
             <nav className="hidden md:flex items-center gap-7 lg:gap-9 xl:gap-12">
               {startNavItems.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.end}
-                  className={({ isActive }) => navLinkClass(isActive, item.stagger)}
+                <Link
+                  key={item.id}
+                  to={getSectionHref(item.id)}
+                  onClick={(e) => handleSectionClick(e, item.id)}
+                  className={navLinkClass(activeSection === item.id, item.stagger)}
                 >
                   {item.label}
-                </NavLink>
+                </Link>
               ))}
             </nav>
           </div>
@@ -109,6 +173,7 @@ export function PublicLayout({
           {/* Center: Brand Logo */}
           <Link
             to={`/${locale}`}
+            onClick={(e) => handleSectionClick(e, 'home')}
             className="justify-self-center shrink-0 flex items-center justify-center focus-visible:outline-white"
           >
             <BrandLogo logoImage={settings?.logoImage} size="md" />
@@ -118,14 +183,14 @@ export function PublicLayout({
           <div className="flex items-center justify-end md:justify-between gap-3 lg:gap-5 min-w-0">
             <nav className="hidden md:flex items-center gap-7 lg:gap-9 xl:gap-12">
               {endNavItems.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.end}
-                  className={({ isActive }) => navLinkClass(isActive, item.stagger)}
+                <Link
+                  key={item.id}
+                  to={getSectionHref(item.id)}
+                  onClick={(e) => handleSectionClick(e, item.id)}
+                  className={navLinkClass(activeSection === item.id, item.stagger)}
                 >
                   {item.label}
-                </NavLink>
+                </Link>
               ))}
             </nav>
 
@@ -165,7 +230,8 @@ export function PublicLayout({
                 </a>
               ) : (
                 <Link
-                  to={`/${locale}/contact`}
+                  to={getSectionHref('contact')}
+                  onClick={(e) => handleSectionClick(e, 'contact')}
                   className="hidden lg:inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap shrink-0 bg-white text-brand-700 hover:bg-brand-100 transition-colors"
                 >
                   <span>{messages.actions.contactUs}</span>
@@ -198,18 +264,18 @@ export function PublicLayout({
               </div>
               <nav className="mt-6 flex flex-col gap-2">
                 {allNavItems.map((item) => (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    end={item.end}
-                    className={({ isActive }) =>
-                      `px-4 py-3 rounded-xl text-base font-semibold transition-colors ${
-                        isActive ? 'bg-white/20 text-white' : 'text-white/90 hover:bg-white/10'
-                      }`
-                    }
+                  <Link
+                    key={item.id}
+                    to={getSectionHref(item.id)}
+                    onClick={(e) => handleSectionClick(e, item.id)}
+                    className={`px-4 py-3 rounded-xl text-base font-semibold transition-colors ${
+                      activeSection === item.id
+                        ? 'bg-white/20 text-white'
+                        : 'text-white/90 hover:bg-white/10'
+                    }`}
                   >
                     {item.label}
-                  </NavLink>
+                  </Link>
                 ))}
               </nav>
             </div>
@@ -227,7 +293,8 @@ export function PublicLayout({
                 </a>
               ) : (
                 <Link
-                  to={`/${locale}/contact`}
+                  to={getSectionHref('contact')}
+                  onClick={(e) => handleSectionClick(e, 'contact')}
                   className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white text-brand-700 font-semibold"
                 >
                   <span>{messages.actions.contactUs}</span>
@@ -299,8 +366,12 @@ export function PublicLayout({
               <h2 className="text-sm font-bold text-white mb-4">{messages.footer.quickLinks}</h2>
               <ul className="space-y-2.5 text-sm text-white/75">
                 {allNavItems.map((item) => (
-                  <li key={item.to}>
-                    <Link to={item.to} className="hover:text-white transition-colors">
+                  <li key={item.id}>
+                    <Link
+                      to={getSectionHref(item.id)}
+                      onClick={(e) => handleSectionClick(e, item.id)}
+                      className="hover:text-white transition-colors"
+                    >
                       {item.label}
                     </Link>
                   </li>
@@ -353,7 +424,8 @@ export function PublicLayout({
                 )}
                 {!settings?.phone && !whatsappUrl && !settings?.email && !address.text && (
                   <Link
-                    to={`/${locale}/contact`}
+                    to={getSectionHref('contact')}
+                    onClick={(e) => handleSectionClick(e, 'contact')}
                     className="inline-block text-white/75 hover:text-white underline underline-offset-4"
                   >
                     {messages.actions.contactUs}

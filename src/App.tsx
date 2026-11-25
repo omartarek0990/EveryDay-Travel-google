@@ -4,13 +4,9 @@ import { I18nProvider } from './components/I18nProvider';
 import { PublicDataProvider, usePublicData } from './components/PublicDataContext';
 import { AdminAuthProvider } from './components/admin/AdminAuthContext';
 import type { Locale } from './shared/types';
-import { AboutPage } from './pages/public/AboutPage';
-import { ContactPage } from './pages/public/ContactPage';
-import { GalleryPage } from './pages/public/GalleryPage';
 import { HomePage } from './pages/public/HomePage';
 import { NotFoundPage } from './pages/public/NotFoundPage';
 import { TripDetailPage } from './pages/public/TripDetailPage';
-import { TripsPage } from './pages/public/TripsPage';
 import { AdminAccountPage } from './pages/admin/AdminAccountPage';
 import { AdminDestinationsPage } from './pages/admin/AdminDestinationsPage';
 import { AdminGalleryPage } from './pages/admin/AdminGalleryPage';
@@ -22,10 +18,12 @@ import { AdminTripFormPage } from './pages/admin/AdminTripFormPage';
 import { AdminTripsListPage } from './pages/admin/AdminTripsListPage';
 
 function ScrollToTop() {
-  const { pathname } = useLocation();
+  const { pathname, hash } = useLocation();
   useEffect(() => {
-    window.scrollTo(0, 0);
-  }, [pathname]);
+    if (!hash) {
+      window.scrollTo(0, 0);
+    }
+  }, [pathname, hash]);
   return null;
 }
 
@@ -72,21 +70,21 @@ export default function App() {
 
             <Route path="/ar" element={<LocaleShell locale="ar" />}>
               <Route index element={<HomePage />} />
-              <Route path="trips" element={<TripsPage />} />
+              <Route path="trips" element={<Navigate to="/ar#trips" replace />} />
               <Route path="trips/:slug" element={<TripDetailPage />} />
-              <Route path="gallery" element={<GalleryPage />} />
-              <Route path="about" element={<AboutPage />} />
-              <Route path="contact" element={<ContactPage />} />
+              <Route path="gallery" element={<Navigate to="/ar#gallery" replace />} />
+              <Route path="about" element={<Navigate to="/ar#about" replace />} />
+              <Route path="contact" element={<Navigate to="/ar#contact" replace />} />
               <Route path="*" element={<NotFoundPage />} />
             </Route>
 
             <Route path="/en" element={<LocaleShell locale="en" />}>
               <Route index element={<HomePage />} />
-              <Route path="trips" element={<TripsPage />} />
+              <Route path="trips" element={<Navigate to="/en#trips" replace />} />
               <Route path="trips/:slug" element={<TripDetailPage />} />
-              <Route path="gallery" element={<GalleryPage />} />
-              <Route path="about" element={<AboutPage />} />
-              <Route path="contact" element={<ContactPage />} />
+              <Route path="gallery" element={<Navigate to="/en#gallery" replace />} />
+              <Route path="about" element={<Navigate to="/en#about" replace />} />
+              <Route path="contact" element={<Navigate to="/en#contact" replace />} />
               <Route path="*" element={<NotFoundPage />} />
             </Route>
 
