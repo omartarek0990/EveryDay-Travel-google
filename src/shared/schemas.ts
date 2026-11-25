@@ -97,19 +97,38 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'كلمة المرور مطلوبة').max(128),
 });
 
+export const usernameSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(3, 'اسم المستخدم يجب أن يكون 3 أحرف على الأقل')
+  .max(32, 'اسم المستخدم طويل جداً')
+  .regex(/^[a-z0-9._-]+$/, 'اسم المستخدم يقبل أحرف إنجليزية وأرقام فقط');
+
 export const setupOwnerSchema = z.object({
-  username: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .min(3, 'اسم المستخدم يجب أن يكون 3 أحرف على الأقل')
-    .max(32)
-    .regex(/^[a-z0-9._-]+$/, 'اسم المستخدم يقبل أحرف إنجليزية وأرقام فقط'),
+  username: usernameSchema,
   password: z.string().min(10, 'كلمة المرور يجب أن تكون 10 أحرف على الأقل').max(128),
 });
 
 export const changePasswordSchema = z.object({
   currentPassword: z.string().min(1, 'كلمة المرور الحالية مطلوبة').max(128),
+  newPassword: z.string().min(10, 'كلمة المرور الجديدة يجب أن تكون 10 أحرف على الأقل').max(128),
+});
+
+export const updateAccountSchema = z
+  .object({
+    currentPassword: z.string().min(1, 'كلمة المرور الحالية مطلوبة').max(128),
+    username: usernameSchema.optional(),
+    newPassword: z.string().max(128).optional(),
+  })
+  .refine(
+    (data) => Boolean(data.username) || Boolean(data.newPassword && data.newPassword.length > 0),
+    { message: 'أدخل اسم مستخدم جديد أو كلمة مرور جديدة' }
+  );
+
+export const resetAccountSchema = z.object({
+  recoveryCode: z.string().trim().min(1, 'رمز الاسترداد مطلوب').max(256),
+  username: usernameSchema,
   newPassword: z.string().min(10, 'كلمة المرور الجديدة يجب أن تكون 10 أحرف على الأقل').max(128),
 });
 

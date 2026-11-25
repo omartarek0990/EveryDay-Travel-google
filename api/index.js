@@ -1290,12 +1290,26 @@ var loginSchema = z.object({
   username: z.string().trim().min(1, "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0645\u0637\u0644\u0648\u0628").max(64),
   password: z.string().min(1, "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0645\u0637\u0644\u0648\u0628\u0629").max(128)
 });
+var usernameSchema = z.string().trim().toLowerCase().min(3, "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 3 \u0623\u062D\u0631\u0641 \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644").max(32, "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0637\u0648\u064A\u0644 \u062C\u062F\u0627\u064B").regex(/^[a-z0-9._-]+$/, "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u064A\u0642\u0628\u0644 \u0623\u062D\u0631\u0641 \u0625\u0646\u062C\u0644\u064A\u0632\u064A\u0629 \u0648\u0623\u0631\u0642\u0627\u0645 \u0641\u0642\u0637");
 var setupOwnerSchema = z.object({
-  username: z.string().trim().toLowerCase().min(3, "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 3 \u0623\u062D\u0631\u0641 \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644").max(32).regex(/^[a-z0-9._-]+$/, "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u064A\u0642\u0628\u0644 \u0623\u062D\u0631\u0641 \u0625\u0646\u062C\u0644\u064A\u0632\u064A\u0629 \u0648\u0623\u0631\u0642\u0627\u0645 \u0641\u0642\u0637"),
+  username: usernameSchema,
   password: z.string().min(10, "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u064A\u062C\u0628 \u0623\u0646 \u062A\u0643\u0648\u0646 10 \u0623\u062D\u0631\u0641 \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644").max(128)
 });
 var changePasswordSchema = z.object({
   currentPassword: z.string().min(1, "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629 \u0645\u0637\u0644\u0648\u0628\u0629").max(128),
+  newPassword: z.string().min(10, "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062C\u062F\u064A\u062F\u0629 \u064A\u062C\u0628 \u0623\u0646 \u062A\u0643\u0648\u0646 10 \u0623\u062D\u0631\u0641 \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644").max(128)
+});
+var updateAccountSchema = z.object({
+  currentPassword: z.string().min(1, "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629 \u0645\u0637\u0644\u0648\u0628\u0629").max(128),
+  username: usernameSchema.optional(),
+  newPassword: z.string().max(128).optional()
+}).refine(
+  (data) => Boolean(data.username) || Boolean(data.newPassword && data.newPassword.length > 0),
+  { message: "\u0623\u062F\u062E\u0644 \u0627\u0633\u0645 \u0645\u0633\u062A\u062E\u062F\u0645 \u062C\u062F\u064A\u062F \u0623\u0648 \u0643\u0644\u0645\u0629 \u0645\u0631\u0648\u0631 \u062C\u062F\u064A\u062F\u0629" }
+);
+var resetAccountSchema = z.object({
+  recoveryCode: z.string().trim().min(1, "\u0631\u0645\u0632 \u0627\u0644\u0627\u0633\u062A\u0631\u062F\u0627\u062F \u0645\u0637\u0644\u0648\u0628").max(256),
+  username: usernameSchema,
   newPassword: z.string().min(10, "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062C\u062F\u064A\u062F\u0629 \u064A\u062C\u0628 \u0623\u0646 \u062A\u0643\u0648\u0646 10 \u0623\u062D\u0631\u0641 \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644").max(128)
 });
 var whyUsItemSchema = z.object({
@@ -1525,7 +1539,8 @@ function createApiRouter() {
         }
       }
     }
-    res.json({ needsSetup, user: currentUser });
+    const recoveryConfigured = Boolean(process.env.OWNER_RECOVERY_CODE?.trim());
+    res.json({ needsSetup, recoveryConfigured, user: currentUser });
   });
   router.post("/auth/setup", async (req, res) => {
     const db = getDb();
@@ -1658,6 +1673,115 @@ function createApiRouter() {
     saveDb(db);
     deleteOtherSessions(user.id, req.sessionToken);
     res.json({ ok: true });
+  });
+  router.post("/auth/update-account", requireOwner, async (req, res) => {
+    const parsed = updateAccountSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message || "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629" });
+      return;
+    }
+    const user = req.ownerUser;
+    const currentValid = await verifyPassword(parsed.data.currentPassword, user.passwordHash);
+    if (!currentValid) {
+      res.status(400).json({ error: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" });
+      return;
+    }
+    const nextUsername = parsed.data.username || user.username;
+    const nextPassword = parsed.data.newPassword?.trim() ? parsed.data.newPassword : null;
+    if (nextPassword) {
+      const strengthError = validatePasswordStrength(nextPassword, nextUsername);
+      if (strengthError) {
+        res.status(400).json({ error: strengthError });
+        return;
+      }
+    }
+    const db = getDb();
+    const target = db.users.find((u) => u.id === user.id);
+    if (!target) {
+      res.status(404).json({ error: "\u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
+      return;
+    }
+    target.username = nextUsername;
+    if (nextPassword) {
+      target.passwordHash = await hashPassword(nextPassword);
+      target.mustChangePassword = false;
+    }
+    saveDb(db);
+    deleteOtherSessions(user.id, req.sessionToken);
+    res.json({
+      ok: true,
+      user: {
+        id: target.id,
+        username: target.username,
+        role: target.role,
+        mustChangePassword: target.mustChangePassword
+      }
+    });
+  });
+  router.post("/auth/reset-account", async (req, res) => {
+    const expectedCode = process.env.OWNER_RECOVERY_CODE?.trim();
+    if (!expectedCode) {
+      res.status(503).json({
+        error: "\u0645\u064A\u0632\u0629 \u0627\u0644\u0627\u0633\u062A\u0631\u062F\u0627\u062F \u063A\u064A\u0631 \u0645\u0641\u0639\u0651\u0644\u0629 \u0628\u0639\u062F. \u0623\u0636\u0641 \u0627\u0644\u0645\u062A\u063A\u064A\u0631 OWNER_RECOVERY_CODE \u0641\u064A \u0625\u0639\u062F\u0627\u062F\u0627\u062A \u0627\u0644\u0628\u064A\u0626\u0629 \u0639\u0644\u0649 \u0627\u0644\u062E\u0627\u062F\u0645 \u0623\u0648\u0644\u0627\u064B."
+      });
+      return;
+    }
+    const ip = getClientIp(req);
+    if (isLoginLocked("__owner_recovery__", ip)) {
+      res.status(429).json({
+        error: "\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u0639\u062F\u062F \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u0645\u0633\u0645\u0648\u062D \u0628\u0647\u0627. \u064A\u0631\u062C\u0649 \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631 15 \u062F\u0642\u064A\u0642\u0629 \u0648\u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0645\u062C\u062F\u062F\u0627\u064B."
+      });
+      return;
+    }
+    const parsed = resetAccountSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message || "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629" });
+      return;
+    }
+    const submittedDigest = crypto4.createHash("sha256").update(parsed.data.recoveryCode).digest();
+    const expectedDigest = crypto4.createHash("sha256").update(expectedCode).digest();
+    if (!crypto4.timingSafeEqual(submittedDigest, expectedDigest)) {
+      recordFailedLogin("__owner_recovery__", ip);
+      res.status(401).json({ error: "\u0631\u0645\u0632 \u0627\u0644\u0627\u0633\u062A\u0631\u062F\u0627\u062F \u063A\u064A\u0631 \u0635\u062D\u064A\u062D" });
+      return;
+    }
+    const strengthError = validatePasswordStrength(parsed.data.newPassword, parsed.data.username);
+    if (strengthError) {
+      res.status(400).json({ error: strengthError });
+      return;
+    }
+    clearFailedLogins("__owner_recovery__", ip);
+    const db = getDb();
+    let owner = db.users.find((u) => u.role === "OWNER");
+    const passwordHash = await hashPassword(parsed.data.newPassword);
+    if (!owner) {
+      owner = {
+        id: crypto4.randomUUID(),
+        username: parsed.data.username,
+        passwordHash,
+        role: "OWNER",
+        mustChangePassword: false,
+        createdAt: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      db.users.push(owner);
+    } else {
+      owner.username = parsed.data.username;
+      owner.passwordHash = passwordHash;
+      owner.mustChangePassword = false;
+    }
+    db.sessions = [];
+    saveDb(db);
+    const { token } = createSessionForUser(owner.id);
+    setSessionCookie(req, res, token);
+    res.json({
+      token,
+      user: {
+        id: owner.id,
+        username: owner.username,
+        role: owner.role,
+        mustChangePassword: owner.mustChangePassword
+      }
+    });
   });
   router.post("/uploads/sign", requireOwner, (req, res) => {
     const ip = getClientIp(req);

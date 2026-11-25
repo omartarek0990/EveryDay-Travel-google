@@ -13,6 +13,7 @@ import { AdminGalleryPage } from './pages/admin/AdminGalleryPage';
 import { AdminHomePage } from './pages/admin/AdminHomePage';
 import { AdminLoginPage } from './pages/admin/AdminLoginPage';
 import { AdminOverviewPage } from './pages/admin/AdminOverviewPage';
+import { AdminResetPage } from './pages/admin/AdminResetPage';
 import { AdminSettingsPage } from './pages/admin/AdminSettingsPage';
 import { AdminTripFormPage } from './pages/admin/AdminTripFormPage';
 import { AdminTripsListPage } from './pages/admin/AdminTripsListPage';
@@ -89,6 +90,7 @@ export default function App() {
             </Route>
 
             <Route path="/admin/login" element={<AdminLoginPage />} />
+            <Route path="/admin/reset" element={<AdminResetPage />} />
             <Route path="/admin" element={<AdminOverviewPage />} />
             <Route path="/admin/trips" element={<AdminTripsListPage />} />
             <Route path="/admin/trips/new" element={<AdminTripFormPage />} />

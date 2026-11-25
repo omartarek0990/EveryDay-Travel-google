@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { Loader2, Lock } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { BrandLogo } from '../../components/BrandLogo';
@@ -142,6 +142,17 @@ export function AdminLoginPage() {
             )}
             <span>{needsSetup ? 'إنشاء حساب المالك والدخول' : 'تسجيل الدخول'}</span>
           </button>
+
+          {!needsSetup && (
+            <div className="pt-1 text-center">
+              <Link
+                to="/admin/reset"
+                className="text-xs font-semibold text-brand-600 hover:text-brand-700"
+              >
+                نسيت اسم المستخدم أو كلمة المرور؟ إعادة تعيين الحساب
+              </Link>
+            </div>
+          )}
         </form>
       </div>
     </div>

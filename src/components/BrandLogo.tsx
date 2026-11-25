@@ -37,7 +37,7 @@ export function BrandLogo({
         viewBox="0 0 36 42"
         fill="none"
         aria-hidden="true"
-        className="w-5 h-6 text-white absolute top-0 left-[54%] -translate-x-1/2"
+        className="w-5 h-6 text-white absolute top-0 left-[56%] -translate-x-1/2"
       >
         <path
           d="M18 3C10.5 3 4.5 9 4.5 16.5C4.5 26 15.2 36.8 17.3 38.8C17.7 39.2 18.3 39.2 18.7 38.8C20.8 36.8 31.5 26 31.5 16.5C31.5 9 25.5 3 18 3Z"
@@ -56,7 +56,7 @@ export function BrandLogo({
       {/* Wordmark */}
       <span className="inline-flex items-baseline leading-none">
         <span className="font-[var(--font-script)] italic font-semibold text-[26px] tracking-tight">
-          every
+          Every
         </span>
         <span className="relative inline-flex flex-col items-start">
           <span className="font-[var(--font-english)] font-normal text-[25px] tracking-tight leading-none">

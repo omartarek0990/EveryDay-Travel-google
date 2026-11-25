@@ -249,58 +249,34 @@ export function PublicLayout({
             className="fixed inset-0 bg-black/50 backdrop-blur-[2px]"
             onClick={() => setDrawerOpen(false)}
           />
-          <div className="fixed inset-y-0 start-0 w-72 max-w-[85vw] bg-brand-600 text-white p-6 flex flex-col justify-between shadow-xl">
-            <div>
-              <div className="flex items-center justify-between pb-6 border-b border-white/15">
-                <BrandLogo logoImage={settings?.logoImage} size="sm" />
-                <button
-                  type="button"
-                  onClick={() => setDrawerOpen(false)}
-                  aria-label={messages.actions.close}
-                  className="p-2 rounded-lg text-white hover:bg-white/15 min-w-[44px] min-h-[44px] flex items-center justify-center"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <nav className="mt-6 flex flex-col gap-2">
-                {allNavItems.map((item) => (
-                  <Link
-                    key={item.id}
-                    to={getSectionHref(item.id)}
-                    onClick={(e) => handleSectionClick(e, item.id)}
-                    className={`px-4 py-3 rounded-xl text-base font-semibold transition-colors ${
-                      activeSection === item.id
-                        ? 'bg-white/20 text-white'
-                        : 'text-white/90 hover:bg-white/10'
-                    }`}
-                  >
-                    {item.label}
-                  </Link>
-                ))}
-              </nav>
+          <div className="fixed inset-y-0 start-0 w-72 max-w-[85vw] bg-[#7A2E09] text-white p-6 flex flex-col shadow-xl">
+            <div className="flex items-center justify-between pb-6 border-b border-white/15">
+              <BrandLogo logoImage={settings?.logoImage} size="sm" />
+              <button
+                type="button"
+                onClick={() => setDrawerOpen(false)}
+                aria-label={messages.actions.close}
+                className="p-2 rounded-lg text-white hover:bg-white/15 min-w-[44px] min-h-[44px] flex items-center justify-center"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
-
-            <div className="pt-6 border-t border-white/15">
-              {whatsappUrl ? (
-                <a
-                  href={whatsappUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white text-brand-700 font-semibold"
-                >
-                  <WhatsAppIcon className="w-4 h-4" />
-                  <span>{messages.actions.whatsappUs}</span>
-                </a>
-              ) : (
+            <nav className="mt-6 flex flex-col gap-2">
+              {allNavItems.map((item) => (
                 <Link
-                  to={getSectionHref('contact')}
-                  onClick={(e) => handleSectionClick(e, 'contact')}
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white text-brand-700 font-semibold"
+                  key={item.id}
+                  to={getSectionHref(item.id)}
+                  onClick={(e) => handleSectionClick(e, item.id)}
+                  className={`px-4 py-3 rounded-xl text-base font-semibold transition-colors ${
+                    activeSection === item.id
+                      ? 'bg-white/20 text-white'
+                      : 'text-white/90 hover:bg-white/10'
+                  }`}
                 >
-                  <span>{messages.actions.contactUs}</span>
+                  {item.label}
                 </Link>
-              )}
-            </div>
+              ))}
+            </nav>
           </div>
         </div>
       )}

@@ -28,8 +28,10 @@ import {
   localizedTextSchema,
   loginSchema,
   normalizeEgyptianWhatsapp,
+  resetAccountSchema,
   setupOwnerSchema,
   tripInputSchema,
+  updateAccountSchema,
   updateHomeSettingsSchema,
   updateSiteSettingsSchema,
   validatePasswordStrength,
@@ -156,7 +158,8 @@ export function createApiRouter(): Router {
       }
     }
 
-    res.json({ needsSetup, user: currentUser });
+    const recoveryConfigured = Boolean(process.env.OWNER_RECOVERY_CODE?.trim());
+    res.json({ needsSetup, recoveryConfigured, user: currentUser });
   });
 
   router.post('/auth/setup', async (req, res) => {
@@ -309,6 +312,134 @@ export function createApiRouter(): Router {
     deleteOtherSessions(user.id, req.sessionToken);
 
     res.json({ ok: true });
+  });
+
+  router.post('/auth/update-account', requireOwner, async (req: AuthenticatedRequest, res) => {
+    const parsed = updateAccountSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message || 'بيانات غير صالحة' });
+      return;
+    }
+
+    const user = req.ownerUser!;
+    const currentValid = await verifyPassword(parsed.data.currentPassword, user.passwordHash);
+    if (!currentValid) {
+      res.status(400).json({ error: 'كلمة المرور الحالية غير صحيحة' });
+      return;
+    }
+
+    const nextUsername = parsed.data.username || user.username;
+    const nextPassword = parsed.data.newPassword?.trim() ? parsed.data.newPassword : null;
+
+    if (nextPassword) {
+      const strengthError = validatePasswordStrength(nextPassword, nextUsername);
+      if (strengthError) {
+        res.status(400).json({ error: strengthError });
+        return;
+      }
+    }
+
+    const db = getDb();
+    const target = db.users.find((u) => u.id === user.id);
+    if (!target) {
+      res.status(404).json({ error: 'المستخدم غير موجود' });
+      return;
+    }
+
+    target.username = nextUsername;
+    if (nextPassword) {
+      target.passwordHash = await hashPassword(nextPassword);
+      target.mustChangePassword = false;
+    }
+    saveDb(db);
+    deleteOtherSessions(user.id, req.sessionToken);
+
+    res.json({
+      ok: true,
+      user: {
+        id: target.id,
+        username: target.username,
+        role: target.role,
+        mustChangePassword: target.mustChangePassword,
+      },
+    });
+  });
+
+  router.post('/auth/reset-account', async (req, res) => {
+    const expectedCode = process.env.OWNER_RECOVERY_CODE?.trim();
+    if (!expectedCode) {
+      res.status(503).json({
+        error:
+          'ميزة الاسترداد غير مفعّلة بعد. أضف المتغير OWNER_RECOVERY_CODE في إعدادات البيئة على الخادم أولاً.',
+      });
+      return;
+    }
+
+    const ip = getClientIp(req);
+    if (isLoginLocked('__owner_recovery__', ip)) {
+      res.status(429).json({
+        error: 'تم تجاوز عدد المحاولات المسموح بها. يرجى الانتظار 15 دقيقة والمحاولة مجدداً.',
+      });
+      return;
+    }
+
+    const parsed = resetAccountSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message || 'بيانات غير صالحة' });
+      return;
+    }
+
+    const submittedDigest = crypto.createHash('sha256').update(parsed.data.recoveryCode).digest();
+    const expectedDigest = crypto.createHash('sha256').update(expectedCode).digest();
+    if (!crypto.timingSafeEqual(submittedDigest, expectedDigest)) {
+      recordFailedLogin('__owner_recovery__', ip);
+      res.status(401).json({ error: 'رمز الاسترداد غير صحيح' });
+      return;
+    }
+
+    const strengthError = validatePasswordStrength(parsed.data.newPassword, parsed.data.username);
+    if (strengthError) {
+      res.status(400).json({ error: strengthError });
+      return;
+    }
+
+    clearFailedLogins('__owner_recovery__', ip);
+
+    const db = getDb();
+    let owner = db.users.find((u) => u.role === 'OWNER');
+    const passwordHash = await hashPassword(parsed.data.newPassword);
+
+    if (!owner) {
+      owner = {
+        id: crypto.randomUUID(),
+        username: parsed.data.username,
+        passwordHash,
+        role: 'OWNER',
+        mustChangePassword: false,
+        createdAt: new Date().toISOString(),
+      };
+      db.users.push(owner);
+    } else {
+      owner.username = parsed.data.username;
+      owner.passwordHash = passwordHash;
+      owner.mustChangePassword = false;
+    }
+
+    db.sessions = [];
+    saveDb(db);
+
+    const { token } = createSessionForUser(owner.id);
+    setSessionCookie(req, res, token);
+
+    res.json({
+      token,
+      user: {
+        id: owner.id,
+        username: owner.username,
+        role: owner.role,
+        mustChangePassword: owner.mustChangePassword,
+      },
+    });
   });
 
   // ---- UPLOADS (OWNER ONLY) ----
