@@ -18,6 +18,7 @@
 | 1 | الصور (Images) | `perf-1-images` | `a5ff291` | مكتمل الكود — بند واحد معلّق (migration 0002) |
 | 2 | JavaScript والخطوط والكاش | `perf-2-js-cache` | `9627084` | مكتمل — التحقق البصري فقط متبقٍ |
 | 3 | المسار الحرج والحمولة والمنطقة | `perf-3-critical-path` | `f0182a0` | مكتمل — LCP معلّق على migration 0002 |
+| — | **قسم Supabase (كل ما يتعلق بقاعدة البيانات والتخزين والمصادقة عبر الأجزاء الثلاثة)** | — | — | **به حاجز واحد: migration 0002** |
 
 ---
 ---
@@ -563,6 +564,198 @@ PART 3 REPORT
 8. **a11y = 93 بالضبط** (الحد الأدنى): سببان قديمان في التصميم — `color-contrast` و`target-size` — لم يُمَسّا التزامًا بقاعدة «لا تغيير في التصميم».
 9. `dist` = 2.86 MB بهامش ضيّق تحت 3 MB.
 10. المشاريع القديمة على Vercel (`part1`, `part2`) ما زالت موجودة ولم تُحذف.
+
+---
+---
+
+# قسم Supabase — كل ما يتعلق بقاعدة البيانات والتخزين والمصادقة
+
+> هذا القسم يجمع كل بنود Supabase الموزّعة على الأجزاء الثلاثة في مكان واحد: المخطط، الدوال، التخزين، الأمان، الحالة الحالية المقيسة، وما يحتاج تنفيذًا.
+
+## 1) دور Supabase في المشروع
+
+- **قاعدة البيانات:** Postgres تحمل كل محتوى الموقع (نصوص، رحلات، صور، إعدادات) + جداول المصادقة المخصّصة.
+- **الدوال (RPC):** قراءة/كتابة الحالة كلها عبر دالتين فقط، لا استعلامات متفرقة.
+- **التخزين (Storage):** bucket عام اسمه `site-images` للصور التي يرفعها المالك من اللوحة.
+- **غير مستخدم:** Supabase Auth (المصادقة مخصّصة: bcrypt + جلسات مبهمة)، ولا Supabase Image Transformations (ميزة مدفوعة، والبرومبت يمنع الاعتماد عليها).
+
+## 2) المخطط (Migrations)
+
+| الملف | الغرض | الحالة |
+| --- | --- | --- |
+| `supabase/migrations/0001_init.sql` | 12 جدولًا + دالتا RPC + RLS + إنشاء bucket `site-images` | **مطبَّق** (الجداول موجودة، تحقّقنا بالقراءة) |
+| `supabase/migrations/0002_image_variants.sql` | `images.variants jsonb` + `images.avg_color text` + إعادة تعريف الدالتين + إعادة تأكيد الصلاحيات | **غير مطبَّق** ❌ |
+
+**الجداول الـ12 من 0001:**
+
+| النوع | الجداول |
+| --- | --- |
+| المحتوى (9) | `site_settings` · `hero_images` · `destinations` · `trips` · `trip_images` · `itinerary_days` · `optional_activities` · `gallery_images` · `images` |
+| المصادقة (3) | `users` · `sessions` · `login_attempts` |
+
+**ملف 0002 إضافي ولا يمسّ شيئًا موجودًا:** عمودان قابلان للـNULL + إعادة تعريف `get_site_state` و`replace_site_state` بنفس الأجسام (لأن `to_jsonb(row)` يُظهر الأعمدة الجديدة تلقائيًا و`jsonb_populate_recordset` يترك المفاتيح الغائبة NULL). قابل لإعادة التنفيذ بأمان (idempotent).
+
+## 3) دالتا RPC
+
+| الدالة | الاستخدام | ملاحظات |
+| --- | --- | --- |
+| `get_site_state()` | تُرجع **كل** الحالة كـJSON واحد | `stable` · `security definer` · `search_path = public` |
+| `replace_site_state(payload)` | تستبدل الحالة كاملة في معاملة واحدة | `plpgsql` · `security definer` |
+
+**ملاحظات مهمة من الأجزاء الثلاثة:**
+- الكاش في الذاكرة **1 ثانية** مع حاجز in-flight (`loadDb()`) لم يتغيّر — يقلّل استدعاءات Supabase بشدة.
+- الجزء 3 أضاف **مهلة 8000ms** عبر `AbortSignal.timeout` على الدالتين.
+- الجزء 3 **لم يُضف RPC جديدة**: الحمولة النحيفة تُبنى في الذاكرة (`buildLandingPayload`)، أي أن `get_site_state` **لا يزال يُرجع الحالة كاملة (~23KB)** والانخفاض ظاهر في استجابة المتصفح فقط (14.9KB).
+- `replace_site_state` تستبدل **كل صفوف المحتوى** (حذف ثم إدراج) في كل حفظ — سلوك قديم من 0001 لم يتغيّر في الأجزاء الثلاثة، وهو مصدر خطر «آخر كاتب يفوز» إذا حُرِّر من تبويبين.
+
+## 4) الأمان (RLS والصلاحيات)
+
+| الإجراء | الحالة |
+| --- | --- |
+| RLS مفعّلة على كل الجداول الـ12 | ✅ من 0001 |
+| سحب كل صلاحيات `anon` و`authenticated` | ✅ من 0001 |
+| منح التنفيذ لـ`service_role` فقط على الدالتين | ✅ من 0001 (أُعيد تأكيده في 0002) |
+| مفتاح `service_role` على السيرفر فقط | ✅ — العميل لا يستدعي Supabase مباشرة أبدًا، فقط `/api/*` |
+| المصادقة المخصّصة | bcrypt cost 12 · جلسات 32 بايت مُهشّرة SHA-256 · قفل 15 دقيقة بعد 5 محاولات |
+
+> ⚠️ تحقّق مهم: مفتاح الخدمة المستخدم هو من نوع `sb_secret_…`، وSupabase **يرفض** استخدامه من متصفح (401 "Forbidden use of secret API key in browser") — وهذا سلوك صحيح يؤكد أنه لا يوجد تسريب للمفتاح إلى العميل.
+
+## 5) التخزين (Storage)
+
+| البند | الحالة |
+| --- | --- |
+| bucket `site-images` | **موجود وعام (public)** ✅ |
+| عدد الملفات داخله | **0 ملف** — لأن صور الـseed مضمّنة في الريبو (`public/assets/img/*.webp`) وليست في Storage |
+| رفع الصور (الجزء 1) | روابط رفع موقّعة قصيرة العمر (`createSignedUploadUrl`) ثم `Cache-Control: max-age=31536000` |
+| التحقق قبل الحفظ | `/api/uploads/verify` يتأكد من وجود **كل** نسخة (variant) في Storage قبل كتابة الصف |
+| الحذف | لا يُحذف أي شيء أثناء الأجزاء الثلاثة؛ الحذف يحدث فقط عند حذف صورة من اللوحة |
+| المهلات (الجزء 3) | 8000ms على `createSignedUploadUrl` و`list` (مرتين) و`remove` |
+
+## 6) متغيرات البيئة المطلوبة
+
+| المتغير | الغرض | ملاحظة |
+| --- | --- | --- |
+| `SUPABASE_URL` | رابط المشروع | مطلوب |
+| `SUPABASE_SERVICE_ROLE_KEY` | مفتاح الخدمة (سيرفر فقط) | **سرّي — لا يُطبع ولا يُرفع** |
+| `SUPABASE_STORAGE_BUCKET` | اسم الـbucket (افتراضي `site-images`) | اختياري |
+| `SESSION_SECRET` | توقيعات الرفع | موصى به بشدة |
+| `OWNER_RECOVERY_CODE` | تفعيل `/admin/reset` | اختياري |
+
+> الأجزاء الثلاثة لا تُطبع أي قيمة منها، و`.env` مستثنى من git (`.gitignore`).
+
+## 7) الحالة الحالية المقيسة (من `npm run verify:supabase`)
+
+| الفحص | النتيجة |
+| --- | --- |
+| `SUPABASE_URL` / `SERVICE_ROLE_KEY` / `STORAGE_BUCKET` | PASS |
+| `images.variants` + `images.avg_color` | **FAIL** — العمود غير موجود |
+| جداول 0001 (11 جدولًا مفحوصًا) | PASS |
+| فهارس 0001 | WARN — لا يمكن فحصها عبر PostgREST (تحتاج SQL Editor) |
+| زمن `get_site_state` (5 استدعاءات) | WARN — أول 2635ms، الوسيط **1794ms** (القياس من مصر) |
+| مقارنة أعداد الصفوف بـ`before-part1.json` | WARN — الملف غير موجود |
+| سلامة المراجع (صور يتيمة) | PASS — لا مراجع مفقودة |
+| روابط الصور تُرجع 200 | PASS |
+| صور بلا variants | **WARN — 9 من 9** |
+| bucket موجود وعام | PASS |
+| ملفات Storage | 0 ملف / 0.00 MB |
+
+**أعداد الصفوف الحالية في القاعدة:**
+
+| الجدول | العدد |
+| --- | --- |
+| `images` | 9 |
+| `trips` | 3 |
+| `trip_images` | 6 |
+| `gallery_images` | 6 |
+| `destinations` | 6 |
+| `itinerary_days` | 9 |
+| `optional_activities` | 4 |
+| `hero_images` | 3 |
+| `site_settings` | 1 |
+| `users` | 1 |
+| `sessions` | 1 |
+| `login_attempts` | 1 |
+
+## 8) تأثير الأجزاء الثلاثة على Supabase
+
+| الجزء | ما تغيّر فعليًا في Supabase |
+| --- | --- |
+| **1** | مخطط جديد (variants/avg_color) · تحقق من وجود النسخ قبل الحفظ · مفاتيح رفع فريدة (`sanitizeUploadKey`) · مسارات نسخ (`imageVariantObjectId` / `imageVariantBasePath`) · `cacheControl: 31536000` · mappers في `server/db.ts` تقرأ/تكتب الحقلين الجديدين وتتعامل مع الغياب كـNULL · سكربت `optimize-images --supabase` |
+| **2** | لا تغيير في المخطط · كاش حافة 60 ثانية أمام قراءات Supabase، و`fresh=1` يتجاوزها · كل مسارات `/api/auth/*` و`/api/admin/*` و`/api/uploads/*` بلا كاش |
+| **3** | مهلة 8000ms على الدوال والتخزين · `Promise.all` لحذف الصور اليتيمة · حمولة أخف للمتصفح (دون تغيير الدالة) · المنطقة `fra1` والتحقق من قرب القاعدة · سكربت `verify:supabase` للفحص للقراءة فقط |
+
+## 9) المهام المعلّقة الخاصة بـSupabase (مرتّبة)
+
+### 🔴 حرجة — تمنع اكتمال الجزء الأول وتحقيق هدف LCP
+
+**1. تطبيق `0002_image_variants.sql`**
+
+الطريقة: Supabase Dashboard → **SQL Editor** → لصق محتوى الملف كاملًا → **Run**.
+
+تحقّق من النجاح (نفس المحرر):
+
+```sql
+-- يجب أن يعيد صفين
+select column_name, data_type
+from information_schema.columns
+where table_schema = 'public'
+  and table_name = 'images'
+  and column_name in ('variants', 'avg_color');
+
+-- يجب أن يعيد 9 صفوف كلها false
+select count(*) as total,
+       count(*) filter (where variants is null) as without_variants
+from public.images;
+```
+
+**2. بعد التطبيق — تعبئة البيانات الحالية** (محليًا بمفاتيح `.env`):
+
+```bash
+npm run db:seed
+npm run verify:supabase -- --site-url=https://everyday-wine.vercel.app
+```
+
+النتيجة المتوقعة: `FAIL images.variants` → **PASS**، و`9 of 9` → **0**، والهيرو على الموبايل من 189 KB → **~27 KB**، و**LCP < 2.5s**.
+
+**3. لو ظهرت أي صورة بلا variants** (مثل صور رُفعت قديمًا):
+
+```bash
+npm run optimize:images -- --supabase --dry-run   # مراجعة
+npm run optimize:images -- --supabase             # تنفيذ
+```
+
+### 🟠 متوسطة
+
+**4. تأكيد منطقة Supabase** — Dashboard → Project Settings → General → **Region**. يجب أن تكون قريبة من `fra1` (فرانكفورت). القياس الحالي يُظهر وسيط **1794ms** لاستدعاء واحد من مصر، وهو WARN؛ جزء منه موقع الجهاز وجزء منه موقع القاعدة.
+
+**5. لو القاعدة بعيدة** — أعد إنشاء المشروع في المنطقة الأقرب ثم:
+```bash
+npm run db:import   # محتوى data/db.json
+npm run db:seed     # أو بيانات الـseed
+```
+ثم حدّث `SUPABASE_URL` و`SUPABASE_SERVICE_ROLE_KEY` في Vercel وأعد النشر.
+
+**6. `npm run snapshot:db`** — قراءة فقط، تنتج `docs/snapshots/before-part1.json` وتُزيل WARN المقارنة.
+
+### 🟡 تحسين اختياري (لم يُنفَّذ)
+
+**7. RPC نحيفة للصفحة العامة** — حاليًا `get_site_state` تُرجع الحالة كاملة (~23 KB) ثم نُقلّمها في الذاكرة. لو أردنا تقليل نقل البيانات وزمن الاستجابة، نضيف دالة مثل `get_landing_state()` تُرجع أعمدة مختارة فقط. **لم تُنفَّذ** لأن البرومبت قال «If needed» ولأن الكاش 1 ثانية يجعل الأثر محدودًا.
+
+**8. الفهارس** — لا يمكن التحقق من فهارس 0001 عبر PostgREST. للتحقق:
+```sql
+select indexname from pg_indexes where schemaname = 'public' order by indexname;
+```
+
+## 10) التراجع (Rollback) — لكل بند
+
+| ما تم | كيف ترجع |
+| --- | --- |
+| تطبيق 0002 | الأعمدة nullable ولا تُحذف بيانات: `alter table public.images drop column if exists variants, drop column if exists avg_color;` — الكود يعمل بدونها |
+| `db:seed` | يعيد بيانات الـseed فقط؛ المحتوى السابق يُستعاد من نسخة احتياطية |
+| `optimize:images --supabase` | `update public.images set variants = null, avg_color = null;` — والملفات المرفوعة تبقى في Storage (لا حذف) |
+| نسخة احتياطية موجودة | `D:\EveryDay-Travel-backup-20261126-214333.json` (27 KB، محتوى فقط بلا أسرار) |
+
+> ⚠️ تحذير: `replace_site_state` تستبدل كل المحتوى. شغّل `npm run snapshot:db` أو خُذ نسخة احتياطية **قبل** أي `db:seed` على بيانات حقيقية.
 
 ---
 ---
