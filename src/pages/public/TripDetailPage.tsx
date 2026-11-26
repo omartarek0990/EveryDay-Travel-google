@@ -1,8 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Check, Clock, MapPin } from 'lucide-react';
 import { useI18n } from '../../components/I18nProvider';
-import { usePublicData } from '../../components/PublicDataContext';
+import { readInjectedTrip, usePublicData } from '../../components/PublicDataContext';
 import { Lightbox, type LightboxItem } from '../../components/public/Lightbox';
 import { PublicLayout } from '../../components/public/PublicLayout';
 import { SeoHead } from '../../components/public/SeoHead';
@@ -16,6 +16,7 @@ import {
   formatTripPrice,
   formatWesternNumber,
 } from '../../shared/format';
+import type { TripWithRelations } from '../../shared/types';
 import { NotFoundPage } from './NotFoundPage';
 
 export function TripDetailPage() {
@@ -25,19 +26,54 @@ export function TripDetailPage() {
   const [activePhotoIdx, setActivePhotoIdx] = useState(0);
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
 
-  const trip = useMemo(
-    () => data?.trips.find((tr) => tr.slug === slug) ?? null,
-    [data, slug]
+  // The trip is injected into the HTML for direct visits; client-side navigation
+  // falls back to GET /api/public/trips/:slug.
+  const [trip, setTrip] = useState<TripWithRelations | null>(() => readInjectedTrip(slug));
+  const [tripStatus, setTripStatus] = useState<'ready' | 'loading' | 'missing'>(() =>
+    readInjectedTrip(slug) ? 'ready' : 'loading'
   );
+
+  useEffect(() => {
+    const injected = readInjectedTrip(slug);
+    if (injected) {
+      setTrip(injected);
+      setTripStatus('ready');
+      return;
+    }
+    if (!slug) {
+      setTrip(null);
+      setTripStatus('missing');
+      return;
+    }
+    let cancelled = false;
+    setTripStatus('loading');
+    fetch(`/api/public/trips/${encodeURIComponent(slug)}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+      .then((json: { trip: TripWithRelations }) => {
+        if (cancelled) return;
+        setTrip(json.trip);
+        setTripStatus('ready');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTrip(null);
+        setTripStatus('missing');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug]);
 
   const similarTrips = useMemo(() => {
     if (!data || !trip) return [];
+    const destinationSlug = trip.destination?.slug;
+    if (!destinationSlug) return [];
     return data.trips
-      .filter((tr) => tr.id !== trip.id && tr.destinationId === trip.destinationId)
+      .filter((tr) => tr.id !== trip.id && tr.destination?.slug === destinationSlug)
       .slice(0, 3);
   }, [data, trip]);
 
-  if (loading || !data) {
+  if (loading || !data || tripStatus === 'loading') {
     return (
       <PublicLayout>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12 space-y-6">

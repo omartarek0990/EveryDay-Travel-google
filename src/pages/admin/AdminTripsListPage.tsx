@@ -160,17 +160,24 @@ export function AdminTripsListPage() {
 
   const handleTogglePublish = async (trip: TripWithRelations) => {
     const nextStatus: TripStatus = trip.status === 'PUBLISHED' ? 'HIDDEN' : 'PUBLISHED';
-    const res = await adminFetch(`/api/admin/trips/${trip.id}/status`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status: nextStatus }),
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      toast.error(json.error || 'تعذر تغيير حالة الرحلة');
-      return;
+    const previous = trips;
+    // Optimistic: show the new state before the round-trip completes.
+    setTrips((current) =>
+      current.map((item) => (item.id === trip.id ? { ...item, status: nextStatus } : item))
+    );
+    try {
+      const res = await adminFetch(`/api/admin/trips/${trip.id}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'تعذر تغيير حالة الرحلة');
+      toast.success(nextStatus === 'PUBLISHED' ? 'تم نشر الرحلة على الموقع' : 'تم إخفاء الرحلة');
+      await refreshAdminData();
+    } catch (error) {
+      setTrips(previous);
+      toast.error(error instanceof Error ? error.message : 'تعذر تغيير حالة الرحلة');
     }
-    await refreshAdminData();
-    toast.success(nextStatus === 'PUBLISHED' ? 'تم نشر الرحلة على الموقع' : 'تم إخفاء الرحلة');
   };
 
   const handleDragEnd = async (event: DragEndEvent) => {
@@ -179,15 +186,20 @@ export function AdminTripsListPage() {
     const oldIdx = trips.findIndex((t) => t.id === active.id);
     const newIdx = trips.findIndex((t) => t.id === over.id);
     if (oldIdx === -1 || newIdx === -1) return;
+    const previous = trips;
     const next = arrayMove(trips, oldIdx, newIdx);
     setTrips(next);
-    const res = await adminFetch('/api/admin/trips/reorder', {
-      method: 'PATCH',
-      body: JSON.stringify({ orderedIds: next.map((t) => t.id) }),
-    });
-    if (res.ok) {
-      await refreshAdminData();
+    try {
+      const res = await adminFetch('/api/admin/trips/reorder', {
+        method: 'PATCH',
+        body: JSON.stringify({ orderedIds: next.map((t) => t.id) }),
+      });
+      if (!res.ok) throw new Error('تعذر تحديث ترتيب الرحلات');
       toast.success('تم تحديث ترتيب الرحلات');
+      await refreshAdminData();
+    } catch (error) {
+      setTrips(previous);
+      toast.error(error instanceof Error ? error.message : 'تعذر تحديث ترتيب الرحلات');
     }
   };
 

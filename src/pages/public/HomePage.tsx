@@ -68,7 +68,9 @@ export function HomePage() {
     );
   }
 
-  const { settings, heroImages, destinations, galleryImages } = data;
+  const { settings, heroImages, destinations } = data;
+  const galleryItems = data.gallery.items;
+  const galleryTotal = data.gallery.total;
   const shownTrips = filteredTrips.slice(0, visibleTripsCount);
   const hasMoreTrips = filteredTrips.length > visibleTripsCount;
 
@@ -102,8 +104,6 @@ export function HomePage() {
     Boolean(settings.email) ||
     Boolean(address.text) ||
     socials.length > 0;
-
-  const shownGallery = galleryImages;
 
   const orgJsonLd = {
     '@context': 'https://schema.org',
@@ -242,12 +242,12 @@ export function HomePage() {
             )}
           </div>
 
-          {galleryImages.length === 0 ? (
+          {galleryTotal === 0 ? (
             <div className="rounded-2xl border border-border bg-surface p-12 text-center text-muted">
               {messages.empty.gallery}
             </div>
           ) : (
-            <HomeGallery items={shownGallery} />
+            <HomeGallery items={galleryItems} total={galleryTotal} />
           )}
         </div>
       </section>

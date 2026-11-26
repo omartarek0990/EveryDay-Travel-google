@@ -196,6 +196,41 @@ export interface PublicSitePayload {
   galleryImages: GalleryImageRecord[];
 }
 
+/** Everything a trip card needs — no itinerary, activities or long description. */
+export interface TripCardData {
+  id: string;
+  slug: string;
+  title: LocalizedText;
+  tagline: LocalizedText;
+  badge: LocalizedText | null;
+  features: LocalizedText[];
+  durationDays: number | null;
+  priceAmount: number | null;
+  pricePrefix: PricePrefix;
+  priceUnit: PriceUnit;
+  destination: Pick<DestinationRecord, 'name' | 'slug'> | null;
+  images: Array<{ id: string; image?: ImageRecord }>;
+}
+
+/** Payload injected into the HTML shell and served by GET /api/public/landing. */
+export interface PublicLandingPayload {
+  settings: PublicSitePayload['settings'];
+  heroImages: HeroImageRecord[];
+  destinations: DestinationRecord[];
+  trips: TripCardData[];
+  gallery: {
+    items: GalleryImageRecord[];
+    total: number;
+  };
+}
+
+export interface GalleryPagePayload {
+  items: GalleryImageRecord[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
 export interface DatabaseSchema {
   users: UserRecord[];
   sessions: SessionRecord[];

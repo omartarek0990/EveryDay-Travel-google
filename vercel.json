@@ -1,6 +1,13 @@
 {
   "buildCommand": "npm run build && npm run build:api",
   "outputDirectory": "dist",
+  "regions": ["fra1"],
+  "functions": {
+    "api/index.js": {
+      "includeFiles": "dist/index.html",
+      "maxDuration": 10
+    }
+  },
   "headers": [
     {
       "source": "/assets/(.*)",
@@ -40,6 +47,11 @@
     { "source": "/uploads/(.*)", "destination": "/api/index.js" },
     { "source": "/robots.txt", "destination": "/api/index.js" },
     { "source": "/sitemap.xml", "destination": "/api/index.js" },
+    { "source": "/", "destination": "/api/index.js" },
+    { "source": "/ar", "destination": "/api/index.js" },
+    { "source": "/en", "destination": "/api/index.js" },
+    { "source": "/ar/(.*)", "destination": "/api/index.js" },
+    { "source": "/en/(.*)", "destination": "/api/index.js" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

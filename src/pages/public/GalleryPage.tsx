@@ -26,7 +26,7 @@ export function GalleryPage() {
   const subtitle = t(data.settings.galleryTitle);
   const companyName = t(data.settings.companyName);
 
-  const lightboxItems: LightboxItem[] = data.galleryImages.map((item) => {
+  const lightboxItems: LightboxItem[] = data.gallery.items.map((item) => {
     const cap = item.caption ? t(item.caption) : null;
     return {
       url: item.image?.url || '',
@@ -56,13 +56,13 @@ export function GalleryPage() {
             )}
           </div>
 
-          {data.galleryImages.length === 0 ? (
+          {data.gallery.items.length === 0 ? (
             <div className="rounded-2xl border border-border bg-surface-alt p-12 text-center text-muted">
               {messages.empty.gallery}
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {data.galleryImages.map((item, idx) => {
+              {data.gallery.items.map((item, idx) => {
                 const cap = item.caption ? t(item.caption) : null;
                 return (
                   <button

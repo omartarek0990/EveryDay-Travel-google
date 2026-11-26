@@ -6,12 +6,12 @@ import express2 from "express";
 // server/cache-headers.ts
 var PUBLIC_CACHE_CONTROL = "public, s-maxage=60, stale-while-revalidate=600";
 var NO_STORE = "no-store";
-function cacheControlForRequest(path3, query = {}) {
+function cacheControlForRequest(path4, query = {}) {
   const fresh = query.fresh === "1" || query.fresh === 1;
-  if (path3.startsWith("/api/public/")) {
+  if (path4.startsWith("/api/public/")) {
     return fresh ? NO_STORE : PUBLIC_CACHE_CONTROL;
   }
-  if (path3.startsWith("/api/auth/") || path3.startsWith("/api/admin/") || path3.startsWith("/api/uploads/")) {
+  if (path4.startsWith("/api/auth/") || path4.startsWith("/api/admin/") || path4.startsWith("/api/uploads/")) {
     return NO_STORE;
   }
   return null;
@@ -28,6 +28,21 @@ function applyApiCacheHeaders(req, res, next) {
 import { createClient } from "@supabase/supabase-js";
 var client = null;
 var DEFAULT_STORAGE_BUCKET = "site-images";
+var SUPABASE_TIMEOUT_MS = 8e3;
+function supabaseAbortSignal() {
+  return AbortSignal.timeout(SUPABASE_TIMEOUT_MS);
+}
+async function withSupabaseTimeout(promise, label = "Supabase", ms = SUPABASE_TIMEOUT_MS) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 function getSupabaseUrl() {
   const url = process.env.SUPABASE_URL?.trim();
   if (!url) return null;
@@ -35,6 +50,9 @@ function getSupabaseUrl() {
 }
 function getSupabaseServiceRoleKey() {
   return process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || null;
+}
+function isSupabaseConfigured() {
+  return Boolean(getSupabaseUrl() && getSupabaseServiceRoleKey());
 }
 function getSupabaseAdmin() {
   const url = getSupabaseUrl();
@@ -875,9 +893,7 @@ function fromDbState(raw) {
 }
 async function persistState(state) {
   const supabase = getSupabaseAdmin();
-  const { error } = await supabase.rpc("replace_site_state", {
-    payload: toDbState(state)
-  });
+  const { error } = await supabase.rpc("replace_site_state", { payload: toDbState(state) }).abortSignal(supabaseAbortSignal());
   if (error) {
     throw new Error(`Failed to save site state to Supabase: ${error.message}`);
   }
@@ -889,7 +905,7 @@ async function loadDb(options = {}) {
   if (loadInFlight) return loadInFlight;
   loadInFlight = (async () => {
     const supabase = getSupabaseAdmin();
-    const { data, error } = await supabase.rpc("get_site_state");
+    const { data, error } = await supabase.rpc("get_site_state").abortSignal(supabaseAbortSignal());
     if (error) {
       throw new Error(
         `Failed to load site state from Supabase: ${error.message}. Make sure supabase/migrations/0001_init.sql has been applied.`
@@ -960,11 +976,270 @@ function buildPublicPayload(db) {
     galleryImages
   };
 }
+var LANDING_TRIP_IMAGE_LIMIT = 3;
+var LANDING_GALLERY_LIMIT = 9;
+function publicSettings(db, imageMap) {
+  return {
+    ...db.siteSettings,
+    logoImage: db.siteSettings.logoImageId ? imageMap.get(db.siteSettings.logoImageId) ?? null : null,
+    faviconImage: db.siteSettings.faviconImageId ? imageMap.get(db.siteSettings.faviconImageId) ?? null : null,
+    ogImage: db.siteSettings.ogImageId ? imageMap.get(db.siteSettings.ogImageId) ?? null : null
+  };
+}
+function galleryWithImages(db, imageMap) {
+  return [...db.galleryImages].sort((a, b) => a.sortOrder - b.sortOrder).map((gi) => ({ ...gi, image: imageMap.get(gi.imageId) })).filter((gi) => Boolean(gi.image));
+}
+function buildLandingPayload(db, galleryLimit = LANDING_GALLERY_LIMIT) {
+  const imageMap = new Map(db.images.map((img) => [img.id, img]));
+  const destinationMap = new Map(db.destinations.map((dest) => [dest.id, dest]));
+  const heroImages = [...db.heroImages].sort((a, b) => a.sortOrder - b.sortOrder).map((hi) => ({ ...hi, image: imageMap.get(hi.imageId) })).filter((hi) => Boolean(hi.image));
+  const destinations = [...db.destinations].filter((d) => d.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
+  const tripImagesByTrip = /* @__PURE__ */ new Map();
+  for (const tripImage of [...db.tripImages].sort((a, b) => a.sortOrder - b.sortOrder)) {
+    const bucket = tripImagesByTrip.get(tripImage.tripId) ?? [];
+    const image = imageMap.get(tripImage.imageId);
+    if (image) bucket.push({ id: tripImage.id, image });
+    tripImagesByTrip.set(tripImage.tripId, bucket);
+  }
+  const trips = [...db.trips].filter((trip) => trip.status === "PUBLISHED").sort((a, b) => a.sortOrder - b.sortOrder).map((trip) => {
+    const destination = destinationMap.get(trip.destinationId) ?? null;
+    return {
+      id: trip.id,
+      slug: trip.slug,
+      title: trip.title,
+      tagline: trip.tagline,
+      badge: trip.badge,
+      features: trip.features,
+      durationDays: trip.durationDays,
+      priceAmount: trip.priceAmount,
+      pricePrefix: trip.pricePrefix,
+      priceUnit: trip.priceUnit,
+      destination: destination ? { name: destination.name, slug: destination.slug } : null,
+      images: (tripImagesByTrip.get(trip.id) ?? []).slice(0, LANDING_TRIP_IMAGE_LIMIT)
+    };
+  });
+  const gallery = galleryWithImages(db, imageMap);
+  return {
+    settings: publicSettings(db, imageMap),
+    heroImages,
+    destinations,
+    trips,
+    gallery: {
+      items: gallery.slice(0, galleryLimit),
+      total: gallery.length
+    }
+  };
+}
+function buildTripPayload(db, slug) {
+  return hydrateTrips(db, false).find((trip) => trip.slug === slug) ?? null;
+}
+function buildGalleryPage(db, offset, limit) {
+  const imageMap = new Map(db.images.map((img) => [img.id, img]));
+  const all = galleryWithImages(db, imageMap);
+  return {
+    items: all.slice(offset, offset + limit),
+    total: all.length,
+    offset,
+    limit
+  };
+}
+
+// server/html-shell.ts
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// src/lib/image-url.ts
+var FALLBACK_IMAGE_WIDTH = 1600;
+var FALLBACK_IMAGE_HEIGHT = 1200;
+function normalizeWidths(widths, maxWidth) {
+  const unique = Array.from(new Set(widths.filter((w) => Number.isFinite(w) && w > 0)));
+  unique.sort((a, b) => a - b);
+  return typeof maxWidth === "number" && maxWidth > 0 ? unique.filter((w) => w <= maxWidth) : unique;
+}
+function selectVariantWidths(variants, sourceWidth, maxWidth) {
+  if (!variants || !Array.isArray(variants.widths)) return [];
+  const limit = Math.min(
+    typeof maxWidth === "number" && maxWidth > 0 ? maxWidth : Number.POSITIVE_INFINITY,
+    typeof sourceWidth === "number" && sourceWidth > 0 ? sourceWidth : Number.POSITIVE_INFINITY
+  );
+  return normalizeWidths(variants.widths, limit);
+}
+function stripExtension(path4) {
+  return path4.replace(/\.[a-z0-9]{2,5}$/i, "");
+}
+function supabasePublicPrefix(url) {
+  const match = /^(.*\/storage\/v1\/object\/public\/[^/]+\/)/.exec(url);
+  return match ? match[1] : null;
+}
+function variantUrl(image, width) {
+  const variants = image.variants;
+  if (!variants || !variants.basePath || !variants.format) return null;
+  if (!selectVariantWidths(variants, image.width).includes(width)) return null;
+  const base = stripExtension(variants.basePath);
+  const fileName = `${base}-w${width}.${variants.format}`;
+  if (image.provider === "SUPABASE") {
+    const prefix = supabasePublicPrefix(image.url);
+    return prefix ? `${prefix}${fileName}` : null;
+  }
+  if (image.provider === "STATIC") {
+    return `/${fileName}`;
+  }
+  return null;
+}
+function buildSrcSet(image, widths) {
+  const entries = widths.map((width) => {
+    const url = variantUrl(image, width);
+    return url ? `${url} ${width}w` : null;
+  }).filter((entry) => Boolean(entry));
+  return entries.length >= 2 ? entries.join(", ") : void 0;
+}
+function imageProps(image, options = {}) {
+  const width = Math.max(1, Math.round(image?.width || FALLBACK_IMAGE_WIDTH));
+  const height = Math.max(1, Math.round(image?.height || FALLBACK_IMAGE_HEIGHT));
+  if (!image?.url) {
+    return { src: null, width, height };
+  }
+  const widths = selectVariantWidths(image.variants, image.width, options.maxWidth);
+  const usable = widths.map((w) => ({ width: w, url: variantUrl(image, w) })).filter((v) => v.url);
+  const base = {
+    width,
+    height,
+    backgroundColor: image.avgColor ?? void 0
+  };
+  if (usable.length === 0) {
+    return { ...base, src: image.url };
+  }
+  const largest = usable[usable.length - 1];
+  const srcSet = buildSrcSet(image, usable.map((v) => v.width));
+  return {
+    ...base,
+    src: largest.url,
+    srcSet,
+    sizes: srcSet ? options.sizes : void 0
+  };
+}
+
+// server/html-shell.ts
+var HERE = path.dirname(fileURLToPath(import.meta.url));
+var TEMPLATE_CANDIDATES = [
+  path.join(process.cwd(), "dist", "index.html"),
+  path.join(HERE, "dist", "index.html"),
+  path.join(HERE, "..", "dist", "index.html"),
+  "/var/task/dist/index.html"
+];
+var cachedTemplate = null;
+function loadHtmlTemplate() {
+  if (cachedTemplate) return cachedTemplate;
+  for (const candidate of TEMPLATE_CANDIDATES) {
+    try {
+      if (fs.existsSync(candidate)) {
+        cachedTemplate = fs.readFileSync(candidate, "utf8");
+        return cachedTemplate;
+      }
+    } catch {
+    }
+  }
+  return null;
+}
+function escapeJsonForScript(value) {
+  return value.replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+}
+function escapeHtml(value) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function pickHeroImage(landing) {
+  return landing.heroImages[0]?.image ?? landing.settings.ogImage ?? null;
+}
+function absoluteUrl(origin, url) {
+  return /^https?:\/\//i.test(url) ? url : `${origin}${url.startsWith("/") ? "" : "/"}${url}`;
+}
+function heroPreloadLinks(image) {
+  if (!image) return "";
+  const props = imageProps(image, { sizes: "100vw", maxWidth: 2e3 });
+  if (!props.src) return "";
+  if (props.srcSet) {
+    const sizes = props.sizes ? ` imagesizes="${escapeHtml(props.sizes)}"` : "";
+    return `<link rel="preload" as="image" imagesrcset="${escapeHtml(
+      props.srcSet
+    )}"${sizes} fetchpriority="high">`;
+  }
+  return `<link rel="preload" as="image" href="${escapeHtml(props.src)}" fetchpriority="high">`;
+}
+function supabasePreconnect(origin) {
+  if (!origin) return "";
+  return `<link rel="preconnect" href="${escapeHtml(origin)}" crossorigin>`;
+}
+function buildHeadTags(options) {
+  const { locale, origin, path: routePath, title, description, imageUrl } = options;
+  const subPath = routePath.replace(/^\/(ar|en)/, "");
+  const canonical = `${origin}/${locale}${subPath}`;
+  const tags = [
+    `<title>${escapeHtml(title)}</title>`,
+    `<meta name="description" content="${escapeHtml(description)}">`,
+    `<link rel="canonical" href="${escapeHtml(canonical)}">`,
+    `<link rel="alternate" hreflang="ar" href="${escapeHtml(`${origin}/ar${subPath}`)}">`,
+    `<link rel="alternate" hreflang="en" href="${escapeHtml(`${origin}/en${subPath}`)}">`,
+    `<link rel="alternate" hreflang="x-default" href="${escapeHtml(`${origin}/ar${subPath}`)}">`,
+    `<meta property="og:type" content="website">`,
+    `<meta property="og:site_name" content="everyDay Travel Agency">`,
+    `<meta property="og:title" content="${escapeHtml(title)}">`,
+    `<meta property="og:description" content="${escapeHtml(description)}">`,
+    `<meta property="og:url" content="${escapeHtml(canonical)}">`,
+    `<meta property="og:locale" content="${locale === "ar" ? "ar_EG" : "en_US"}">`,
+    `<meta name="twitter:card" content="summary_large_image">`,
+    `<meta name="twitter:title" content="${escapeHtml(title)}">`,
+    `<meta name="twitter:description" content="${escapeHtml(description)}">`
+  ];
+  if (imageUrl) {
+    const absolute = absoluteUrl(origin, imageUrl);
+    tags.push(`<meta property="og:image" content="${escapeHtml(absolute)}">`);
+    tags.push(`<meta name="twitter:image" content="${escapeHtml(absolute)}">`);
+  }
+  return tags.join("\n    ");
+}
+function localized(value, locale, fallbackAr = true) {
+  if (!value) return "";
+  const preferred = locale === "en" ? value.en : value.ar;
+  if (preferred) return preferred;
+  return fallbackAr ? value.ar : "";
+}
+function renderShell(options) {
+  const { template, locale, origin, path: routePath, landing, trip } = options;
+  const dir = locale === "ar" ? "rtl" : "ltr";
+  const settings = landing.settings;
+  const title = trip ? `${localized(trip.title, locale)} | ${localized(settings.seoTitle, locale)}` : localized(settings.seoTitle, locale);
+  const description = trip ? localized(trip.tagline, locale) || localized(trip.description, locale) : localized(settings.seoDescription, locale);
+  const coverImage = trip?.images[0]?.image ?? pickHeroImage(landing);
+  const siteData = escapeJsonForScript(JSON.stringify(trip ? { ...landing, trip } : landing));
+  let head = template.replace(/<title>[\s\S]*?<\/title>/i, "").replace(/<meta\s+name="description"[^>]*>/i, "").replace(/<meta\s+property="og:[^"]*"[^>]*>/gi, "").replace(/<meta\s+name="twitter:[^"]*"[^>]*>/gi, "");
+  const injectedHead = [
+    buildHeadTags({ locale, origin, path: routePath, title, description, imageUrl: coverImage?.url ?? null }),
+    heroPreloadLinks(pickHeroImage(landing)),
+    supabasePreconnect(options.supabaseOrigin ?? null),
+    `<script id="site-data" type="application/json">${siteData}</script>`
+  ].filter(Boolean).join("\n    ");
+  head = head.replace("</head>", `    ${injectedHead}
+  </head>`);
+  head = head.replace(/<html[^>]*>/i, `<html lang="${locale}" dir="${dir}">`);
+  return head;
+}
+function safeRenderShell(options) {
+  if (!options.template) {
+    return { html: "", injected: false };
+  }
+  try {
+    return { html: renderShell({ ...options, template: options.template }), injected: true };
+  } catch (error) {
+    console.error("[html-shell] injection failed, serving the plain template:", error);
+    return { html: options.template, injected: false };
+  }
+}
 
 // server/routes.ts
 import crypto3 from "node:crypto";
-import fs2 from "node:fs";
-import path2 from "node:path";
+import fs3 from "node:fs";
+import path3 from "node:path";
 import express from "express";
 import { z as z2 } from "zod";
 
@@ -1277,10 +1552,10 @@ async function requireOwner(req, res, next) {
 
 // server/storage.ts
 import crypto2 from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
+import fs2 from "node:fs";
+import path2 from "node:path";
 var IS_SERVERLESS_READONLY = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
-var LOCAL_UPLOAD_DIR = IS_SERVERLESS_READONLY ? path.join("/tmp", "everyday-uploads") : path.resolve(process.cwd(), "public", "uploads");
+var LOCAL_UPLOAD_DIR = IS_SERVERLESS_READONLY ? path2.join("/tmp", "everyday-uploads") : path2.resolve(process.cwd(), "public", "uploads");
 var MIME_TO_EXT = {
   "image/jpeg": "jpg",
   "image/jpg": "jpg",
@@ -1328,7 +1603,10 @@ var SupabaseStorage = class {
     const bucket = getStorageBucket();
     const key = sanitizeUploadKey(options?.key) ?? crypto2.randomUUID();
     const objectPath = `${sanitizeFolder(folder)}/${key}.${extensionFor(options)}`;
-    const { data, error } = await getSupabaseAdmin().storage.from(bucket).createSignedUploadUrl(objectPath);
+    const { data, error } = await withSupabaseTimeout(
+      getSupabaseAdmin().storage.from(bucket).createSignedUploadUrl(objectPath),
+      "Supabase signed upload"
+    );
     if (error || !data) {
       throw new Error(`Failed to sign Supabase upload: ${error?.message ?? "unknown error"}`);
     }
@@ -1350,10 +1628,10 @@ var SupabaseStorage = class {
     const slash = publicId.lastIndexOf("/");
     const dir = slash >= 0 ? publicId.slice(0, slash) : "";
     const name = slash >= 0 ? publicId.slice(slash + 1) : publicId;
-    const { data, error } = await supabase.storage.from(bucket).list(dir, {
-      search: name,
-      limit: 100
-    });
+    const { data, error } = await withSupabaseTimeout(
+      supabase.storage.from(bucket).list(dir, { search: name, limit: 100 }),
+      "Supabase storage list"
+    );
     if (error) {
       throw new Error(`Failed to verify Supabase upload: ${error.message}`);
     }
@@ -1376,7 +1654,10 @@ var SupabaseStorage = class {
   }
   async destroy(publicId) {
     if (publicId.startsWith("seed/") || publicId.startsWith("local/")) return;
-    const { error } = await getSupabaseAdmin().storage.from(getStorageBucket()).remove([publicId]);
+    const { error } = await withSupabaseTimeout(
+      getSupabaseAdmin().storage.from(getStorageBucket()).remove([publicId]),
+      "Supabase storage remove"
+    );
     if (error) {
       console.error(`[ImageStorage] Supabase remove failed for ${publicId}: ${error.message}`);
     }
@@ -1518,20 +1799,20 @@ var StaticStorage = class {
   }
   async exists(publicId) {
     if (!publicId.startsWith("local/")) return false;
-    const resolved = path.resolve(LOCAL_UPLOAD_DIR, publicId.slice("local/".length));
-    return resolved.startsWith(LOCAL_UPLOAD_DIR + path.sep) && fs.existsSync(resolved);
+    const resolved = path2.resolve(LOCAL_UPLOAD_DIR, publicId.slice("local/".length));
+    return resolved.startsWith(LOCAL_UPLOAD_DIR + path2.sep) && fs2.existsSync(resolved);
   }
   async verify(publicId) {
     if (!publicId.startsWith("local/")) {
       throw new Error("Invalid local publicId");
     }
     const fileName = publicId.slice("local/".length);
-    const resolved = path.resolve(LOCAL_UPLOAD_DIR, fileName);
-    if (!resolved.startsWith(LOCAL_UPLOAD_DIR + path.sep) || !fs.existsSync(resolved)) {
+    const resolved = path2.resolve(LOCAL_UPLOAD_DIR, fileName);
+    if (!resolved.startsWith(LOCAL_UPLOAD_DIR + path2.sep) || !fs2.existsSync(resolved)) {
       throw new Error("Uploaded file not found");
     }
-    const stat = fs.statSync(resolved);
-    const ext = path.extname(fileName).replace(".", "").toLowerCase() || "jpg";
+    const stat = fs2.statSync(resolved);
+    const ext = path2.extname(fileName).replace(".", "").toLowerCase() || "jpg";
     return {
       provider: "STATIC",
       publicId,
@@ -1545,11 +1826,11 @@ var StaticStorage = class {
   async destroy(publicId) {
     if (!publicId.startsWith("local/")) return;
     const fileName = publicId.slice("local/".length);
-    const resolved = path.resolve(LOCAL_UPLOAD_DIR, fileName);
-    if (!resolved.startsWith(LOCAL_UPLOAD_DIR + path.sep)) return;
+    const resolved = path2.resolve(LOCAL_UPLOAD_DIR, fileName);
+    if (!resolved.startsWith(LOCAL_UPLOAD_DIR + path2.sep)) return;
     try {
-      if (fs.existsSync(resolved)) {
-        fs.unlinkSync(resolved);
+      if (fs2.existsSync(resolved)) {
+        fs2.unlinkSync(resolved);
       }
     } catch (err) {
       console.error(`[ImageStorage] Static destroy error for ${publicId}:`, err);
@@ -1574,8 +1855,8 @@ function getImageStorage() {
   return staticStorage;
 }
 function ensureLocalUploadDir() {
-  if (!fs.existsSync(LOCAL_UPLOAD_DIR)) {
-    fs.mkdirSync(LOCAL_UPLOAD_DIR, { recursive: true });
+  if (!fs2.existsSync(LOCAL_UPLOAD_DIR)) {
+    fs2.mkdirSync(LOCAL_UPLOAD_DIR, { recursive: true });
   }
   return LOCAL_UPLOAD_DIR;
 }
@@ -1609,21 +1890,21 @@ function prepareTranslationTasks(entries) {
     tasks,
     apply: (translatedMap, failedPaths) => {
       const out = /* @__PURE__ */ new Map();
-      for (const [path3, base] of prepared.entries()) {
-        if (translatedMap.has(path3)) {
-          out.set(path3, {
+      for (const [path4, base] of prepared.entries()) {
+        if (translatedMap.has(path4)) {
+          out.set(path4, {
             ar: base.ar,
-            en: translatedMap.get(path3).trim(),
+            en: translatedMap.get(path4).trim(),
             enManual: false
           });
-        } else if (failedPaths.has(path3)) {
-          out.set(path3, {
+        } else if (failedPaths.has(path4)) {
+          out.set(path4, {
             ar: base.ar,
             en: "",
             enManual: false
           });
         } else {
-          out.set(path3, base);
+          out.set(path4, base);
         }
       }
       return out;
@@ -2063,14 +2344,16 @@ function isImageReferencedElsewhere(db, imageId, exclude) {
 async function cleanupOrphanImages(imageIds) {
   const db = getDb();
   const storage = getImageStorage();
+  const orphanIds = [];
   const remaining = [];
   for (const img of db.images) {
     if (imageIds.includes(img.id) && !isImageReferencedElsewhere(db, img.id)) {
-      await storage.destroy(img.publicId);
+      orphanIds.push(img.publicId);
     } else {
       remaining.push(img);
     }
   }
+  await Promise.all(orphanIds.map((publicId) => storage.destroy(publicId)));
   db.images = remaining;
   await saveDb(db);
 }
@@ -2079,6 +2362,25 @@ function createApiRouter() {
   router.get("/public/site", (_req, res) => {
     const db = getDb();
     res.json(buildPublicPayload(db));
+  });
+  router.get("/public/landing", (_req, res) => {
+    const db = getDb();
+    res.json(buildLandingPayload(db));
+  });
+  router.get("/public/trips/:slug", (req, res) => {
+    const db = getDb();
+    const trip = buildTripPayload(db, String(req.params.slug));
+    if (!trip) {
+      res.status(404).json({ error: "\u0627\u0644\u0631\u062D\u0644\u0629 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u0629" });
+      return;
+    }
+    res.json({ trip });
+  });
+  router.get("/public/gallery", (req, res) => {
+    const db = getDb();
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const limit = Math.min(48, Math.max(1, Number(req.query.limit) || LANDING_GALLERY_LIMIT));
+    res.json(buildGalleryPage(db, offset, limit));
   });
   router.get(
     "/auth/me",
@@ -2383,12 +2685,12 @@ function createApiRouter() {
       }
       const uploadDir = ensureLocalUploadDir();
       const fileName = `${key ?? crypto3.randomUUID()}.${ext}`;
-      const targetPath = path2.resolve(uploadDir, fileName);
-      if (!targetPath.startsWith(uploadDir + path2.sep)) {
+      const targetPath = path3.resolve(uploadDir, fileName);
+      if (!targetPath.startsWith(uploadDir + path3.sep)) {
         res.status(400).json({ error: "\u0645\u0633\u0627\u0631 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D" });
         return;
       }
-      fs2.writeFileSync(targetPath, body);
+      fs3.writeFileSync(targetPath, body);
       const width = Math.min(2560, Math.max(100, Number(req.headers["x-upload-width"]) || 1600));
       const height = Math.min(2560, Math.max(100, Number(req.headers["x-upload-height"]) || 1200));
       res.json({
@@ -3105,16 +3407,24 @@ function handleSitemapXml(req, res) {
 }
 
 // server/app.ts
+var HTML_CACHE_CONTROL = "public, max-age=0, s-maxage=60, stale-while-revalidate=600";
+var HTML_FAILSAFE_CACHE_CONTROL = "public, max-age=0, s-maxage=5";
+function localeFromPath(path4) {
+  return path4.startsWith("/en") ? "en" : "ar";
+}
 function createApp() {
   const app2 = express2();
   app2.set("trust proxy", 1);
   app2.use(async (req, res, next) => {
-    if (req.path.startsWith("/api") || req.path === "/sitemap.xml") {
+    if (req.path.startsWith("/api") || req.path === "/sitemap.xml" || isHtmlRoute(req.path)) {
       try {
         await loadDb();
       } catch (err) {
-        next(err);
-        return;
+        if (!isHtmlRoute(req.path)) {
+          next(err);
+          return;
+        }
+        console.error("[html-shell] database unavailable, serving the plain shell:", err);
       }
     }
     next();
@@ -3123,8 +3433,8 @@ function createApp() {
     const csp = [
       "default-src 'self'",
       "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      "font-src 'self' https://fonts.gstatic.com data:",
+      "style-src 'self' 'unsafe-inline'",
+      "font-src 'self' data:",
       "img-src 'self' https://res.cloudinary.com https://*.supabase.co data: blob:",
       "connect-src 'self' https://api.cloudinary.com https://*.supabase.co ws: wss:",
       "object-src 'none'",
@@ -3140,6 +3450,55 @@ function createApp() {
     next();
   });
   app2.use(express2.json({ limit: "2mb" }));
+  app2.get("/", (req, res) => {
+    const acceptLang = String(req.headers["accept-language"] || "").toLowerCase();
+    const prefersEnglish = acceptLang.startsWith("en") && !acceptLang.includes("ar");
+    res.redirect(302, prefersEnglish ? "/en" : "/ar");
+  });
+  app2.get(
+    [/^\/ar$/, /^\/en$/, /^\/ar\/.*/, /^\/en\/.*/],
+    (req, res, next) => {
+      const locale = localeFromPath(req.path);
+      const template = loadHtmlTemplate();
+      if (!template && process.env.NODE_ENV !== "production") {
+        next();
+        return;
+      }
+      const origin = requestOrigin(req);
+      let landing;
+      try {
+        landing = buildLandingPayload(getDb());
+      } catch (error) {
+        console.error("[html-shell] payload unavailable, serving the plain shell:", error);
+        servePlainShell(res, template);
+        return;
+      }
+      const tripMatch = /^\/(?:ar|en)\/trips\/([^/]+)\/?$/.exec(req.path);
+      let trip = null;
+      if (tripMatch) {
+        try {
+          trip = buildTripPayload(getDb(), decodeURIComponent(tripMatch[1]));
+        } catch (error) {
+          console.error("[html-shell] trip lookup failed:", error);
+        }
+      }
+      const rendered = safeRenderShell({
+        template,
+        locale,
+        origin,
+        path: req.path,
+        landing,
+        trip,
+        supabaseOrigin: isSupabaseConfigured() ? getSupabaseUrl() : null
+      });
+      if (!rendered.injected) {
+        servePlainShell(res, template);
+        return;
+      }
+      res.setHeader("Cache-Control", HTML_CACHE_CONTROL);
+      res.type("html").send(rendered.html);
+    }
+  );
   app2.get("/robots.txt", handleRobotsTxt);
   app2.get("/sitemap.xml", handleSitemapXml);
   try {
@@ -3165,6 +3524,25 @@ function createApp() {
     }
   });
   return app2;
+}
+function isHtmlRoute(path4) {
+  return /^\/($|ar(\/|$)|en(\/|$))/.test(path4);
+}
+function requestOrigin(req) {
+  const proto = req.headers["x-forwarded-proto"] || req.protocol || "https";
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  if (host) return `${proto}://${host}`;
+  const configured = process.env.APP_URL || process.env.VITE_SITE_URL;
+  if (configured && configured.startsWith("http")) return configured.replace(/\/+$/, "");
+  return "http://localhost:3000";
+}
+function servePlainShell(res, template) {
+  res.setHeader("Cache-Control", HTML_FAILSAFE_CACHE_CONTROL);
+  if (!template) {
+    res.status(503).type("text/plain").send("Service unavailable");
+    return;
+  }
+  res.type("html").send(template);
 }
 
 // server/vercel-entry.ts

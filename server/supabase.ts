@@ -4,6 +4,30 @@ let client: SupabaseClient | null = null;
 
 export const DEFAULT_STORAGE_BUCKET = 'site-images';
 
+/** Upper bound for every Supabase round-trip originating from the function. */
+export const SUPABASE_TIMEOUT_MS = 8000;
+
+export function supabaseAbortSignal(): AbortSignal {
+  return AbortSignal.timeout(SUPABASE_TIMEOUT_MS);
+}
+
+/** For client calls that do not accept an AbortSignal (storage API). */
+export async function withSupabaseTimeout<T>(
+  promise: Promise<T>,
+  label = 'Supabase',
+  ms = SUPABASE_TIMEOUT_MS
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export function getSupabaseUrl(): string | null {
   const url = process.env.SUPABASE_URL?.trim();
   if (!url) return null;

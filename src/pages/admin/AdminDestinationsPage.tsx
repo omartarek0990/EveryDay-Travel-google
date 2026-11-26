@@ -197,15 +197,20 @@ export function AdminDestinationsPage() {
     const oldIdx = items.findIndex((i) => i.id === active.id);
     const newIdx = items.findIndex((i) => i.id === over.id);
     if (oldIdx === -1 || newIdx === -1) return;
+    const previous = items;
     const next = arrayMove(items, oldIdx, newIdx);
     setItems(next);
-    const res = await adminFetch('/api/admin/destinations/reorder', {
-      method: 'PATCH',
-      body: JSON.stringify({ orderedIds: next.map((i) => i.id) }),
-    });
-    if (res.ok) {
-      await refreshAdminData();
+    try {
+      const res = await adminFetch('/api/admin/destinations/reorder', {
+        method: 'PATCH',
+        body: JSON.stringify({ orderedIds: next.map((i) => i.id) }),
+      });
+      if (!res.ok) throw new Error('تعذر تحديث الترتيب');
       toast.success('تم تحديث الترتيب');
+      await refreshAdminData();
+    } catch (error) {
+      setItems(previous);
+      toast.error(error instanceof Error ? error.message : 'تعذر تحديث الترتيب');
     }
   };
 

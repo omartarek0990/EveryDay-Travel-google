@@ -1,8 +1,8 @@
-import React, { Suspense, lazy, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { useI18n } from '../I18nProvider';
 import { usePublicData } from '../PublicDataContext';
 import { ResilientImage } from '../ResilientImage';
-import type { GalleryImageRecord } from '../../shared/types';
+import type { GalleryImageRecord, GalleryPagePayload } from '../../shared/types';
 import type { LightboxItem } from './Lightbox';
 
 // Only downloaded when a visitor actually opens a photo.
@@ -14,17 +14,49 @@ const GALLERY_PAGE_SIZE = 9;
  * Owns the gallery pagination and the lightbox state, so opening or closing a
  * photo never re-renders the rest of the home page.
  */
-export function HomeGallery({ items }: { items: GalleryImageRecord[] }) {
+export function HomeGallery({
+  items,
+  total,
+}: {
+  items: GalleryImageRecord[];
+  total: number;
+}) {
   const { t, messages } = useI18n();
   const { data } = usePublicData();
   const companyName = data ? t(data.settings.companyName).text : '';
+  const [all, setAll] = useState<GalleryImageRecord[]>(items);
   const [visibleCount, setVisibleCount] = useState(GALLERY_PAGE_SIZE);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
 
-  const shown = items.slice(0, visibleCount);
-  const hasMore = items.length > visibleCount;
+  // Follow the server payload when it is revalidated in the background.
+  useEffect(() => {
+    setAll(items);
+  }, [items]);
 
-  const lightboxItems: LightboxItem[] = items.map((item) => {
+  const shown = all.slice(0, visibleCount);
+  const hasMore = visibleCount < total;
+
+  const loadMore = async () => {
+    const target = Math.min(visibleCount + GALLERY_PAGE_SIZE, total);
+    if (all.length < target) {
+      setLoadingMore(true);
+      try {
+        const res = await fetch(`/api/public/gallery?offset=${all.length}&limit=${target - all.length}`);
+        if (res.ok) {
+          const page = (await res.json()) as GalleryPagePayload;
+          setAll((previous) => [...previous, ...page.items]);
+        }
+      } catch {
+        // Keep whatever is already rendered; the button stays available.
+      } finally {
+        setLoadingMore(false);
+      }
+    }
+    setVisibleCount(target);
+  };
+
+  const lightboxItems: LightboxItem[] = all.map((item) => {
     const caption = item.caption ? t(item.caption) : null;
     return {
       url: item.image?.url || '',
@@ -49,7 +81,7 @@ export function HomeGallery({ items }: { items: GalleryImageRecord[] }) {
             >
               <ResilientImage
                 image={item.image}
-                alt={caption?.text || ''}
+                alt={caption?.text || companyName}
                 sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
                 maxWidth={1200}
                 className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
@@ -74,8 +106,9 @@ export function HomeGallery({ items }: { items: GalleryImageRecord[] }) {
         <div className="mt-10 flex justify-center">
           <button
             type="button"
-            onClick={() => setVisibleCount((count) => count + GALLERY_PAGE_SIZE)}
-            className="px-6 py-3 rounded-xl border border-border bg-surface hover:bg-surface-alt text-ink font-semibold text-sm transition-colors"
+            onClick={() => void loadMore()}
+            disabled={loadingMore}
+            className="px-6 py-3 rounded-xl border border-border bg-surface hover:bg-surface-alt text-ink font-semibold text-sm transition-colors disabled:opacity-60"
           >
             {messages.actions.showMore}
           </button>

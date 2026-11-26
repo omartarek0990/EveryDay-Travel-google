@@ -25,6 +25,35 @@ function ScrollToTop() {
   return null;
 }
 
+/**
+ * Real user monitoring, loaded after the load event so it never competes with
+ * the critical path. Requires Speed Insights to be enabled in the Vercel project.
+ */
+function SpeedInsightsOnLoad() {
+  useEffect(() => {
+    let cancelled = false;
+    const inject = () => {
+      import('@vercel/speed-insights')
+        .then((module) => {
+          if (!cancelled) module.injectSpeedInsights();
+        })
+        .catch(() => {
+          /* analytics is best-effort */
+        });
+    };
+    if (document.readyState === 'complete') {
+      inject();
+    } else {
+      window.addEventListener('load', inject, { once: true });
+    }
+    return () => {
+      cancelled = true;
+      window.removeEventListener('load', inject);
+    };
+  }, []);
+  return null;
+}
+
 function FaviconSync() {
   const { data } = usePublicData();
   useEffect(() => {
@@ -63,6 +92,7 @@ export default function App() {
       <PublicDataProvider>
         <ScrollToTop />
         <FaviconSync />
+        <SpeedInsightsOnLoad />
         <Routes>
           <Route path="/" element={<RootRedirect />} />
 

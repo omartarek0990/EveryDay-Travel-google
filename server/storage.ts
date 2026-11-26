@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ImageRecord } from '../src/shared/types.ts';
-import { getStorageBucket, getSupabaseAdmin, getSupabaseUrl } from './supabase.ts';
+import { getStorageBucket, getSupabaseAdmin, getSupabaseUrl, withSupabaseTimeout } from './supabase.ts';
 
 export interface UploadSignatureResult {
   provider: 'SUPABASE' | 'CLOUDINARY' | 'STATIC';
@@ -118,9 +118,10 @@ class SupabaseStorage implements ImageStorage {
     const bucket = getStorageBucket();
     const key = sanitizeUploadKey(options?.key) ?? crypto.randomUUID();
     const objectPath = `${sanitizeFolder(folder)}/${key}.${extensionFor(options)}`;
-    const { data, error } = await getSupabaseAdmin()
-      .storage.from(bucket)
-      .createSignedUploadUrl(objectPath);
+    const { data, error } = await withSupabaseTimeout(
+      getSupabaseAdmin().storage.from(bucket).createSignedUploadUrl(objectPath),
+      'Supabase signed upload'
+    );
 
     if (error || !data) {
       throw new Error(`Failed to sign Supabase upload: ${error?.message ?? 'unknown error'}`);
@@ -149,10 +150,10 @@ class SupabaseStorage implements ImageStorage {
     const dir = slash >= 0 ? publicId.slice(0, slash) : '';
     const name = slash >= 0 ? publicId.slice(slash + 1) : publicId;
 
-    const { data, error } = await supabase.storage.from(bucket).list(dir, {
-      search: name,
-      limit: 100,
-    });
+    const { data, error } = await withSupabaseTimeout(
+      supabase.storage.from(bucket).list(dir, { search: name, limit: 100 }),
+      'Supabase storage list'
+    );
     if (error) {
       throw new Error(`Failed to verify Supabase upload: ${error.message}`);
     }
@@ -187,7 +188,10 @@ class SupabaseStorage implements ImageStorage {
 
   async destroy(publicId: string): Promise<void> {
     if (publicId.startsWith('seed/') || publicId.startsWith('local/')) return;
-    const { error } = await getSupabaseAdmin().storage.from(getStorageBucket()).remove([publicId]);
+    const { error } = await withSupabaseTimeout(
+      getSupabaseAdmin().storage.from(getStorageBucket()).remove([publicId]),
+      'Supabase storage remove'
+    );
     if (error) {
       console.error(`[ImageStorage] Supabase remove failed for ${publicId}: ${error.message}`);
     }

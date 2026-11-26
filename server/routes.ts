@@ -28,7 +28,16 @@ import {
   verifyPassword,
   type AuthenticatedRequest,
 } from './auth.ts';
-import { buildPublicPayload, getDb, hydrateTrips, saveDb } from './db.ts';
+import {
+  buildGalleryPage,
+  buildLandingPayload,
+  buildPublicPayload,
+  buildTripPayload,
+  getDb,
+  hydrateTrips,
+  LANDING_GALLERY_LIMIT,
+  saveDb,
+} from './db.ts';
 import { ensureLocalUploadDir, getImageStorage, imageVariantBasePath, imageVariantObjectId, sanitizeUploadKey, staticStorage } from './storage.ts';
 import { translateEntriesBatch } from './translation.ts';
 import {
@@ -104,14 +113,17 @@ function isImageReferencedElsewhere(
 async function cleanupOrphanImages(imageIds: string[]): Promise<void> {
   const db = getDb();
   const storage = getImageStorage();
+  const orphanIds: string[] = [];
   const remaining: ImageRecord[] = [];
   for (const img of db.images) {
     if (imageIds.includes(img.id) && !isImageReferencedElsewhere(db, img.id)) {
-      await storage.destroy(img.publicId);
+      orphanIds.push(img.publicId);
     } else {
       remaining.push(img);
     }
   }
+  // Storage deletes are independent: run them together instead of one by one.
+  await Promise.all(orphanIds.map((publicId) => storage.destroy(publicId)));
   db.images = remaining;
   await saveDb(db);
 }
@@ -120,9 +132,35 @@ export function createApiRouter(): Router {
   const router = express.Router();
 
   // ---- PUBLIC ----
+  // Full payload, kept for clients that still ask for it (part 1/2 builds).
   router.get('/public/site', (_req, res) => {
     const db = getDb();
     res.json(buildPublicPayload(db));
+  });
+
+  // Slim landing payload: card data + first gallery page only.
+  router.get('/public/landing', (_req, res) => {
+    const db = getDb();
+    res.json(buildLandingPayload(db));
+  });
+
+  // One full trip (itinerary, activities, all images) for the trip page.
+  router.get('/public/trips/:slug', (req, res) => {
+    const db = getDb();
+    const trip = buildTripPayload(db, String(req.params.slug));
+    if (!trip) {
+      res.status(404).json({ error: 'الرحلة غير موجودة' });
+      return;
+    }
+    res.json({ trip });
+  });
+
+  // Paged gallery for the "Show more" button.
+  router.get('/public/gallery', (req, res) => {
+    const db = getDb();
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const limit = Math.min(48, Math.max(1, Number(req.query.limit) || LANDING_GALLERY_LIMIT));
+    res.json(buildGalleryPage(db, offset, limit));
   });
 
   // ---- AUTH ----

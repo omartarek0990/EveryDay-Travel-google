@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Check, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useI18n } from '../I18nProvider';
 import { buildWhatsAppUrl, formatDaysCount, formatTripPrice } from '../../shared/format';
-import type { SiteSettings, TripWithRelations } from '../../shared/types';
+import type { SiteSettings, TripCardData } from '../../shared/types';
 import { ResilientImage } from '../ResilientImage';
 import { prefetchTripDetail } from '../../lib/prefetch';
 import { WhatsAppIcon } from './WhatsAppIcon';
@@ -12,7 +12,7 @@ function TripCardBase({
   trip,
   settings,
 }: {
-  trip: TripWithRelations;
+  trip: TripCardData;
   settings: SiteSettings;
 }) {
   const { locale, dir, messages, t } = useI18n();

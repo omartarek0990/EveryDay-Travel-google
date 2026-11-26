@@ -319,3 +319,131 @@ curl -I -H 'Accept-Encoding: br' https://<preview-url>/assets/<main js file> \
 5. Switch AR/EN and confirm the fonts and the italic "Every" wordmark look the
    same as before, and that there is no visible shift when the font loads.
 
+---
+
+# Performance sprint — part 3: critical path, payload, region
+
+Branch `perf-3-critical-path`. Scope: HTML delivery, API payload, `vercel.json`
+(routing/region/functions), server timeouts, dashboard optimistic UI, measurement
+tooling and the Supabase verification script. Design, copy, RTL, hero rules and
+dashboard features are unchanged.
+
+## Payload
+
+| Endpoint | Bytes (seed data) | Contents |
+| --- | --- | --- |
+| `GET /api/public/site` (old, still served) | 23,115 | everything: trips with itinerary, activities, descriptions, every gallery image |
+| `GET /api/public/landing` (new, slim) | 14,914 | settings, hero images, destinations, trip cards (first 3 images each), first 9 gallery items + `total` |
+| `GET /api/public/trips/:slug` | 5,662 (one trip) | full trip: itinerary, optional activities, all images |
+| `GET /api/public/gallery?offset=&limit=` | paged | the rest of the gallery for "Show more" |
+
+All public endpoints share `public, s-maxage=60, stale-while-revalidate=600`;
+`?fresh=1` answers `no-store`.
+
+## HTML shell (lightweight SSR)
+
+`/`, `/ar`, `/en`, `/ar/*`, `/en/*` are rewritten to the serverless function
+(the rest of `vercel.json` — `/api/*`, `/uploads/*`, `robots.txt`,
+`sitemap.xml`, assets, `/admin` — is routed exactly as before). The function
+reads `dist/index.html` (bundled through `functions.includeFiles`) and injects:
+
+- `<script id="site-data" type="application/json">` with the slim payload (and,
+  on a trip route, the full trip), with `<`, U+2028 and U+2029 escaped;
+- `<title>`, description, canonical, `hreflang` alternates, Open Graph and
+  Twitter tags for the route — trip URLs use the trip title/tagline/cover so
+  WhatsApp and Facebook previews work without JavaScript;
+- `<html lang dir>`;
+- `<link rel="preload" as="image" imagesrcset=... imagesizes=...>` for the first
+  hero image and a `preconnect` to the Supabase origin.
+
+Response header: `public, max-age=0, s-maxage=60, stale-while-revalidate=600`.
+Failsafe: the whole injection is wrapped in `try/catch`; on any error (or when
+the template is missing or the database is unreachable) the untouched template
+is served with `public, max-age=0, s-maxage=5` and the error is logged. The
+client (`PublicDataProvider`) reads `#site-data` first, so the first paint has no
+data request and no skeleton; it revalidates quietly in an idle callback. When
+`site-data` is missing or invalid it fetches `/api/public/landing` exactly as
+before. Trip pages read the injected trip when the slug matches and otherwise
+call `/api/public/trips/:slug`, so client-side navigation and cached shells both
+work.
+
+Locally verified (production build, real Supabase): `/ar` → 200, 17.5 KB,
+`site-data` 13.1 KB, preload present, `lang="ar" dir="rtl"`, cache header as
+above; `/en` → `lang="en" dir="ltr"`; `/ar/trips/dahab-red-sea-escape` → 23.4 KB
+with `og:title` containing the trip title and the trip inside `site-data`; `/` →
+302 to `/ar`.
+
+## Region, timeouts and parallelism
+
+- `vercel.json` → `"regions": ["fra1"]` (Frankfurt: the Vercel region closest to
+  Egypt among the common ones) and `"functions": { "api/index.js": { "maxDuration": 10 } }`.
+- **Check the Supabase region:** Supabase Dashboard → Project Settings → General
+  → "Region". If it is not `eu-central`/Europe, put the Vercel function in the
+  matching region instead (Vercel → Project → Settings → Functions → Region, or
+  edit `regions` in `vercel.json`). Vercel's region list and plan limits for
+  function regions are on the project's Functions settings page.
+- If the database lives far from Egypt, recreating the project in a closer region
+  and re-importing with `npm run db:import` (content) plus `npm run db:seed` is
+  the documented escape hatch.
+- Timeouts: `SUPABASE_TIMEOUT_MS = 8000`; the two RPCs (`get_site_state`,
+  `replace_site_state`) use `AbortSignal.timeout`, and every Storage call
+  (signed upload, list/verify, remove) is wrapped in `withSupabaseTimeout`.
+- Parallelism: independent storage deletes in `cleanupOrphanImages` now run with
+  `Promise.all`; upload variant checks were already parallel.
+
+## Dashboard optimistic UI
+
+The publish/hide toggle on `/admin/trips` and the drag reordering of trips,
+destinations and gallery items update the list immediately, call the API, and
+roll back to the previous array with an error toast if the request fails. All of
+this lives in the lazy admin chunk, so no bytes reach the public bundle.
+
+## Measurement
+
+- `lighthouserc.cjs` (via devDependency `@lhci/cli`) asserts the mobile budgets:
+  performance ≥ 0.9, LCP ≤ 2500 ms, TBT ≤ 200 ms, CLS ≤ 0.1, script bytes
+  ≤ 200 KB gzip (three-run median).
+  Run: `npm run perf -- https://<preview-url>`.
+- `@vercel/speed-insights` is injected after the `window.load` event (dynamic
+  import), so it never blocks the critical path. **Omar must enable Speed
+  Insights in the Vercel dashboard** (Project → Speed Insights → Enable).
+
+## Supabase verification
+
+```bash
+npm run verify:supabase                                   # database + storage only
+npm run verify:supabase -- --site-url=https://<preview>   # + deployed-site checks
+```
+
+Read-only (no inserts/updates/deletes); prints PASS/WARN/FAIL per check and exits
+1 on any FAIL. It never prints secrets. Set
+`VERCEL_AUTOMATION_BYPASS_SECRET` when the preview is behind Deployment
+Protection. Run it from the same machine/region as the function for meaningful
+latency numbers.
+
+## Manual checklist for Omar on the Preview URL
+
+1. Open `/ar` and `/en`: hero, cards and gallery render without a skeleton flash;
+   the HTML source shows `site-data`, the hero preload and per-route meta tags.
+2. Switch AR/EN: language, direction and the italic "Every" wordmark are intact.
+3. Open a trip from a card (client-side) and reload it directly: both render the
+   same page; share the URL in WhatsApp and confirm the preview shows the trip
+   title, tagline and cover.
+4. Open the gallery lightbox and click "Show more" (loads page 2 from
+   `/api/public/gallery`).
+5. Log in at `/admin`, upload an image, rename a trip, toggle publish and drag a
+   trip: every action reflects immediately, and the public page shows it within
+   about a minute (60 s edge cache).
+
+## All three parts — final numbers (local build)
+
+| Metric | Baseline | After part 1 | After part 2 | After part 3 |
+| --- | --- | --- | --- | --- |
+| `dist/` total | 14.32 MB | 2.70 MB | 2.86 MB | ~2.9 MB |
+| Initial public JS (gzip) | 172.44 KB | 172.44 KB | 100.60 KB | ~101 KB |
+| Public payload | 23.1 KB (everything) | 23.1 KB | 23.1 KB | 14.9 KB (landing) + 5.7 KB per trip |
+| HTML first byte | static shell only | static shell only | static shell only | shell + data + meta + hero preload |
+| Fonts | 3 Google Fonts families (render-blocking, third-party) | same | self-hosted, subset, preloaded | same |
+| Region | Vercel default | default | default | `fra1` |
+
+

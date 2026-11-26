@@ -2,14 +2,17 @@ import type {
   ContentDatabaseSchema,
   DestinationRecord,
   GalleryImageRecord,
+  GalleryPagePayload,
   HeroImageRecord,
   ImageRecord,
+  PublicLandingPayload,
   PublicSitePayload,
   SiteSettings,
+  TripCardData,
   TripRecord,
   TripWithRelations,
 } from '../src/shared/types.ts';
-import { getSupabaseAdmin } from './supabase.ts';
+import { getSupabaseAdmin, supabaseAbortSignal } from './supabase.ts';
 
 const CACHE_TTL_MS = 1_000;
 
@@ -853,9 +856,9 @@ export function fromDbState(raw: unknown): ContentDatabaseSchema {
 
 async function persistState(state: ContentDatabaseSchema): Promise<void> {
   const supabase = getSupabaseAdmin();
-  const { error } = await supabase.rpc('replace_site_state', {
-    payload: toDbState(state),
-  });
+  const { error } = await supabase
+    .rpc('replace_site_state', { payload: toDbState(state) })
+    .abortSignal(supabaseAbortSignal());
   if (error) {
     throw new Error(`Failed to save site state to Supabase: ${error.message}`);
   }
@@ -874,7 +877,9 @@ export async function loadDb(options: { force?: boolean } = {}): Promise<Content
 
   loadInFlight = (async () => {
     const supabase = getSupabaseAdmin();
-    const { data, error } = await supabase.rpc('get_site_state');
+    const { data, error } = await supabase
+      .rpc('get_site_state')
+      .abortSignal(supabaseAbortSignal());
     if (error) {
       throw new Error(
         `Failed to load site state from Supabase: ${error.message}. ` +
@@ -995,5 +1000,123 @@ export function buildPublicPayload(db: ContentDatabaseSchema): PublicSitePayload
     destinations,
     trips,
     galleryImages,
+  };
+}
+
+export const LANDING_TRIP_IMAGE_LIMIT = 3;
+export const LANDING_GALLERY_LIMIT = 9;
+
+function publicSettings(
+  db: ContentDatabaseSchema,
+  imageMap: Map<string, ImageRecord>
+): PublicSitePayload['settings'] {
+  return {
+    ...db.siteSettings,
+    logoImage: db.siteSettings.logoImageId
+      ? imageMap.get(db.siteSettings.logoImageId) ?? null
+      : null,
+    faviconImage: db.siteSettings.faviconImageId
+      ? imageMap.get(db.siteSettings.faviconImageId) ?? null
+      : null,
+    ogImage: db.siteSettings.ogImageId
+      ? imageMap.get(db.siteSettings.ogImageId) ?? null
+      : null,
+  };
+}
+
+function galleryWithImages(
+  db: ContentDatabaseSchema,
+  imageMap: Map<string, ImageRecord>
+): GalleryImageRecord[] {
+  return [...db.galleryImages]
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((gi) => ({ ...gi, image: imageMap.get(gi.imageId) }))
+    .filter((gi) => Boolean(gi.image));
+}
+
+/**
+ * Slim payload for the landing page and the HTML shell: card data only, no
+ * itineraries, optional activities, long descriptions or admin-only fields.
+ */
+export function buildLandingPayload(
+  db: ContentDatabaseSchema,
+  galleryLimit = LANDING_GALLERY_LIMIT
+): PublicLandingPayload {
+  const imageMap = new Map(db.images.map((img) => [img.id, img]));
+  const destinationMap = new Map(db.destinations.map((dest) => [dest.id, dest]));
+
+  const heroImages: HeroImageRecord[] = [...db.heroImages]
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((hi) => ({ ...hi, image: imageMap.get(hi.imageId) }))
+    .filter((hi) => Boolean(hi.image));
+
+  const destinations = [...db.destinations]
+    .filter((d) => d.isActive)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+
+  const tripImagesByTrip = new Map<string, Array<{ id: string; image?: ImageRecord }>>();
+  for (const tripImage of [...db.tripImages].sort((a, b) => a.sortOrder - b.sortOrder)) {
+    const bucket = tripImagesByTrip.get(tripImage.tripId) ?? [];
+    const image = imageMap.get(tripImage.imageId);
+    if (image) bucket.push({ id: tripImage.id, image });
+    tripImagesByTrip.set(tripImage.tripId, bucket);
+  }
+
+  const trips: TripCardData[] = [...db.trips]
+    .filter((trip) => trip.status === 'PUBLISHED')
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((trip) => {
+      const destination = destinationMap.get(trip.destinationId) ?? null;
+      return {
+        id: trip.id,
+        slug: trip.slug,
+        title: trip.title,
+        tagline: trip.tagline,
+        badge: trip.badge,
+        features: trip.features,
+        durationDays: trip.durationDays,
+        priceAmount: trip.priceAmount,
+        pricePrefix: trip.pricePrefix,
+        priceUnit: trip.priceUnit,
+        destination: destination ? { name: destination.name, slug: destination.slug } : null,
+        images: (tripImagesByTrip.get(trip.id) ?? []).slice(0, LANDING_TRIP_IMAGE_LIMIT),
+      };
+    });
+
+  const gallery = galleryWithImages(db, imageMap);
+
+  return {
+    settings: publicSettings(db, imageMap),
+    heroImages,
+    destinations,
+    trips,
+    gallery: {
+      items: gallery.slice(0, galleryLimit),
+      total: gallery.length,
+    },
+  };
+}
+
+/** Full trip for GET /api/public/trips/:slug. */
+export function buildTripPayload(
+  db: ContentDatabaseSchema,
+  slug: string
+): TripWithRelations | null {
+  return hydrateTrips(db, false).find((trip) => trip.slug === slug) ?? null;
+}
+
+/** Paged gallery for the landing page "Show more" button. */
+export function buildGalleryPage(
+  db: ContentDatabaseSchema,
+  offset: number,
+  limit: number
+): GalleryPagePayload {
+  const imageMap = new Map(db.images.map((img) => [img.id, img]));
+  const all = galleryWithImages(db, imageMap);
+  return {
+    items: all.slice(offset, offset + limit),
+    total: all.length,
+    offset,
+    limit,
   };
 }
