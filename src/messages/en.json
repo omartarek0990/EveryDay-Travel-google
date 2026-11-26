@@ -1,0 +1,81 @@
+{
+  "nav": {
+    "home": "Home",
+    "trips": "Trips",
+    "gallery": "Gallery",
+    "about": "About us",
+    "contact": "Contact us"
+  },
+  "actions": {
+    "askAboutTrip": "Ask about this trip",
+    "exploreTrips": "Explore trips",
+    "contactUs": "Contact us",
+    "viewAllTrips": "View all trips",
+    "showMore": "Show more",
+    "all": "All",
+    "openInMaps": "Open in Maps",
+    "callUs": "Call us",
+    "whatsappUs": "Chat on WhatsApp",
+    "emailUs": "Send an email",
+    "backHome": "Back to home",
+    "close": "Close",
+    "previous": "Previous",
+    "next": "Next",
+    "menu": "Menu"
+  },
+  "trip": {
+    "itinerary": "Itinerary",
+    "dayLabel": "Day",
+    "optionalActivities": "Optional activities",
+    "free": "Free",
+    "extraCost": "Extra cost",
+    "startingFrom": "Starting from",
+    "perPerson": "per person",
+    "perTrip": "per trip",
+    "duration": "Duration",
+    "destination": "Destination",
+    "similarTrips": "Similar trips",
+    "contactForPrice": "Contact us for the price",
+    "noTripsYet": "No trips yet",
+    "noTripsInDest": "No trips are currently listed for this destination.",
+    "featuresTitle": "Trip highlights",
+    "detailsTitle": "About this trip"
+  },
+  "sections": {
+    "latestTrips": "Latest trips",
+    "whyEveryDay": "Why everyDay",
+    "galleryPreview": "Photo gallery",
+    "viewGallery": "View full gallery",
+    "readyToTravel": "Ready for your next trip?"
+  },
+  "aboutHighlights": {
+    "teamTitle": "Professional Team",
+    "teamBody": "Our qualified and trained team is dedicated to delivering the best service for every traveler.",
+    "destinationsTitle": "All Tourist Destinations",
+    "destinationsBody": "We cover Egypt's finest coastal, desert, and cultural destinations across our curated programs.",
+    "hotelsTitle": "Luxury Hotels",
+    "hotelsBody": "All our partnerships are with high-standard hotels and resorts chosen for your comfort.",
+    "transportTitle": "Tourist Transport",
+    "transportBody": "Top-tier tourist transportation with modern, air-conditioned coaches and vehicles."
+  },
+  "contact": {
+    "phoneLabel": "Phone",
+    "whatsappLabel": "WhatsApp",
+    "emailLabel": "Email",
+    "addressLabel": "Address",
+    "socialLabel": "Follow us",
+    "noContactDetails": "Contact details will be added soon."
+  },
+  "notFound": {
+    "title": "Page not found",
+    "description": "The page you are looking for does not exist or may have moved."
+  },
+  "empty": {
+    "gallery": "No photos in the gallery yet."
+  },
+  "footer": {
+    "quickLinks": "Quick links",
+    "contactInfo": "Contact",
+    "rights": "All rights reserved"
+  }
+}

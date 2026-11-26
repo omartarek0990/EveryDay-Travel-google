@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-100: #FCE9D9;
+  --color-brand-500: #D9660F;
+  --color-brand-600: #C4500E;
+  --color-brand-700: #A8420B;
+  --color-ink: #231A12;
+  --color-muted: #6B5E52;
+  --color-surface: #FFFFFF;
+  --color-surface-alt: #FAF6F0;
+  --color-border: #E8DFD3;
+
+  --font-arabic: "Cairo", system-ui, -apple-system, sans-serif;
+  --font-english: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  --font-script: "Playfair Display", Georgia, serif;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-arabic);
+    scroll-behavior: smooth;
+    color: var(--color-ink);
+    background-color: var(--color-surface);
+  }
+
+  html[lang="en"] {
+    font-family: var(--font-english);
+  }
+
+  html[lang="ar"] {
+    font-family: var(--font-arabic);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand-600);
+    outline-offset: 2px;
+  }
+
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
