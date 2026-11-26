@@ -447,3 +447,52 @@ latency numbers.
 | Region | Vercel default | default | default | `fra1` |
 
 
+
+## Measured on production (26 Nov 2026)
+
+`npm run perf -- https://part2-pied-alpha.vercel.app` (Lighthouse CI, mobile, 3 runs):
+
+| Run | Performance | LCP | TBT | CLS | FCP | SI | TTFB |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 0.85 | 4.3 s | 90 ms | 0 | 1.0 s | 2.1 s | 100 ms |
+| 2 | 0.94 | 3.0 s | 90 ms | 0 | 1.0 s | 2.2 s | 80 ms |
+| 3 | 0.95 | 2.9 s | 30 ms | 0 | 0.9 s | 1.8 s | 90 ms |
+| **median** | **0.94 ✅** | **3.0 s ❌ (target 2.5 s)** | **90 ms ✅** | **0 ✅** | 1.0 s | 2.1 s | 90 ms |
+
+Performance, TBT and CLS already meet the part-3 targets; **LCP is the only failing
+metric**, and it is caused by the still-pending `0002_image_variants.sql`: without
+the `variants` column every image falls back to a single 1200 px WebP (the hero is
+~189 KB). After the migration + `npm run db:seed`, the mobile page offers the
+480 px hero (~27 KB) in the `imagesrcset` preload, which is the expected fix.
+
+## verify:supabase on production
+
+```
+PASS  SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / SUPABASE_STORAGE_BUCKET
+FAIL  images.variants / images.avg_color   missing (column does not exist)  <-- migration 0002
+WARN  get_site_state latency (5 calls)     first 2635 ms, median 1794 ms
+WARN  row counts vs before-part1.json      snapshot missing
+PASS  referenced image ids exist
+PASS  referenced image urls answer 200
+PASS  variant urls answer 200 (0 checked — no variants yet)
+WARN  images without variants              9 of 9
+PASS  bucket site-images exists and is public
+PASS  storage objects                      0 objects (seed images are bundled)
+PASS  /api/public/landing, fresh=1 no-store, /api/auth/me no-store
+PASS  /, /ar, /en, /sitemap.xml, /robots.txt
+PASS  /ar contains site-data + hero preload, lang="ar" dir="rtl"
+PASS  content-encoding br
+PASS  trip page 200 with og:title
+Summary: 26 PASS, 5 WARN, 1 FAIL
+```
+
+The single FAIL is the unapplied migration; the ~1.8 s RPC latency measured from
+Egypt is a WARN because the script's own location dominates it — measure from the
+function region for a meaningful number.
+
+## Failsafe test (verified locally)
+
+With `SUPABASE_URL` pointing at an unreachable project, `GET /ar` returned
+`200` with the untouched 1.4 KB template, no `site-data`, and
+`Cache-Control: public, max-age=0, s-maxage=5` — the page still boots and the
+client fetches its data as a fallback.

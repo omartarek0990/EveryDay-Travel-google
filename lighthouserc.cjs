@@ -11,7 +11,6 @@ module.exports = {
     collect: {
       numberOfRuns: 3,
       settings: {
-        preset: 'mobile',
         throttlingMethod: 'simulate',
       },
     },

@@ -19,7 +19,7 @@
     "reset-password": "tsx scripts/reset-password.ts",
     "snapshot:db": "tsx scripts/snapshot-db.ts",
     "optimize:images": "tsx scripts/optimize-images.ts",
-    "perf": "lhci autorun --collect.url",
+    "perf": "node scripts/perf.mjs",
     "verify:supabase": "tsx scripts/verify-supabase.ts"
   },
   "dependencies": {

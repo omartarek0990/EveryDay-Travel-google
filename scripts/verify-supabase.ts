@@ -48,12 +48,12 @@ async function checkEnvironment(): Promise<void> {
   console.log(`      (script runs from ${process.cwd()}; latency depends on this machine's location)`);
 }
 
-async function checkSchema(): Promise<boolean> {
+async function checkSchema(): Promise<void> {
   const supabase = getSupabaseAdmin();
   const { error } = await supabase.from('images').select('id, variants, avg_color').limit(1);
   if (error) {
     record('FAIL', 'images.variants / images.avg_color', `missing (${error.message})`);
-    return false;
+    return;
   }
   record('PASS', 'images.variants / images.avg_color', 'migration 0002 applied');
 
@@ -85,7 +85,6 @@ async function checkSchema(): Promise<boolean> {
     '0001_init indexes',
     'indexes are not exposed through PostgREST; verify in the SQL editor'
   );
-  return true;
 }
 
 async function checkRpc(): Promise<void> {
@@ -384,13 +383,11 @@ async function main(): Promise<void> {
   console.log(`verify:supabase${siteUrl ? ` (site ${siteUrl})` : ''}\n`);
   await checkEnvironment();
   if (isSupabaseConfigured()) {
-    const schemaOk = await checkSchema();
-    if (schemaOk) {
-      await checkRpc();
-      await checkDataIntegrity();
-      await checkImages();
-      await checkStorage();
-    }
+    await checkSchema();
+    await checkRpc();
+    await checkDataIntegrity();
+    await checkImages();
+    await checkStorage();
   }
   await checkSite();
 
