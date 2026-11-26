@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useState } from 'react';
 import { useI18n } from '../I18nProvider';
 import { usePublicData } from '../PublicDataContext';
 import { ResilientImage } from '../ResilientImage';
@@ -24,20 +24,16 @@ export function HomeGallery({ items }: { items: GalleryImageRecord[] }) {
   const shown = items.slice(0, visibleCount);
   const hasMore = items.length > visibleCount;
 
-  const lightboxItems: LightboxItem[] = useMemo(
-    () =>
-      items.map((item) => {
-        const caption = item.caption ? t(item.caption) : null;
-        return {
-          url: item.image?.url || '',
-          alt: caption?.text || companyName,
-          caption: caption?.text,
-          captionIsFallbackAr: caption?.isFallbackAr,
-          image: item.image ?? null,
-        };
-      }),
-    [items, t, companyName]
-  );
+  const lightboxItems: LightboxItem[] = items.map((item) => {
+    const caption = item.caption ? t(item.caption) : null;
+    return {
+      url: item.image?.url || '',
+      alt: caption?.text || companyName,
+      caption: caption?.text,
+      captionIsFallbackAr: caption?.isFallbackAr,
+      image: item.image ?? null,
+    };
+  });
 
   return (
     <>
