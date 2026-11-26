@@ -1,0 +1,164 @@
+[
+  {
+    "source": "src\\assets\\images\\gallery_nuweiba_camp_1795599275538.jpg",
+    "baseName": "gallery_nuweiba_camp_1795599275538",
+    "width": 1200,
+    "height": 896,
+    "variants": {
+      "format": "webp",
+      "widths": [
+        480,
+        768,
+        1200
+      ],
+      "basePath": "assets/img/gallery_nuweiba_camp_1795599275538"
+    },
+    "avgColor": "#5b483f",
+    "bytesBefore": 972359,
+    "bytesAfter": 253030
+  },
+  {
+    "source": "src\\assets\\images\\hero_dahab_redsea_1795599272813.jpg",
+    "baseName": "hero_dahab_redsea_1795599272813",
+    "width": 1376,
+    "height": 768,
+    "variants": {
+      "format": "webp",
+      "widths": [
+        480,
+        768,
+        1200
+      ],
+      "basePath": "assets/img/hero_dahab_redsea_1795599272813"
+    },
+    "avgColor": "#9d9787",
+    "bytesBefore": 948532,
+    "bytesAfter": 221002
+  },
+  {
+    "source": "src\\assets\\images\\hero_farsha_sharm_1795616934669.jpg",
+    "baseName": "hero_farsha_sharm_1795616934669",
+    "width": 1376,
+    "height": 768,
+    "variants": {
+      "format": "webp",
+      "widths": [
+        480,
+        768,
+        1200
+      ],
+      "basePath": "assets/img/hero_farsha_sharm_1795616934669"
+    },
+    "avgColor": "#504042",
+    "bytesBefore": 975862,
+    "bytesAfter": 222090
+  },
+  {
+    "source": "src\\assets\\images\\hero_saint_catherine_snow_1795616932524.jpg",
+    "baseName": "hero_saint_catherine_snow_1795616932524",
+    "width": 1376,
+    "height": 768,
+    "variants": {
+      "format": "webp",
+      "widths": [
+        480,
+        768,
+        1200
+      ],
+      "basePath": "assets/img/hero_saint_catherine_snow_1795616932524"
+    },
+    "avgColor": "#89858a",
+    "bytesBefore": 1126864,
+    "bytesAfter": 320184
+  },
+  {
+    "source": "src\\assets\\images\\hero_siwa_4x4_1795616932838.jpg",
+    "baseName": "hero_siwa_4x4_1795616932838",
+    "width": 1376,
+    "height": 768,
+    "variants": {
+      "format": "webp",
+      "widths": [
+        480,
+        768,
+        1200
+      ],
+      "basePath": "assets/img/hero_siwa_4x4_1795616932838"
+    },
+    "avgColor": "#965e2d",
+    "bytesBefore": 733527,
+    "bytesAfter": 105196
+  },
+  {
+    "source": "src\\assets\\images\\hero_siwa_oasis_1795599273206.jpg",
+    "baseName": "hero_siwa_oasis_1795599273206",
+    "width": 1376,
+    "height": 768,
+    "variants": {
+      "format": "webp",
+      "widths": [
+        480,
+        768,
+        1200
+      ],
+      "basePath": "assets/img/hero_siwa_oasis_1795599273206"
+    },
+    "avgColor": "#987d5d",
+    "bytesBefore": 826611,
+    "bytesAfter": 153296
+  },
+  {
+    "source": "src\\assets\\images\\trip_alexandria_corniche_1795599275506.jpg",
+    "baseName": "trip_alexandria_corniche_1795599275506",
+    "width": 1200,
+    "height": 896,
+    "variants": {
+      "format": "webp",
+      "widths": [
+        480,
+        768,
+        1200
+      ],
+      "basePath": "assets/img/trip_alexandria_corniche_1795599275506"
+    },
+    "avgColor": "#9c9c94",
+    "bytesBefore": 993186,
+    "bytesAfter": 299936
+  },
+  {
+    "source": "src\\assets\\images\\trip_dahab_snorkeling_1795599274928.jpg",
+    "baseName": "trip_dahab_snorkeling_1795599274928",
+    "width": 1200,
+    "height": 896,
+    "variants": {
+      "format": "webp",
+      "widths": [
+        480,
+        768,
+        1200
+      ],
+      "basePath": "assets/img/trip_dahab_snorkeling_1795599274928"
+    },
+    "avgColor": "#80928a",
+    "bytesBefore": 1112373,
+    "bytesAfter": 378218
+  },
+  {
+    "source": "src\\assets\\images\\trip_siwa_safari_1795599273291.jpg",
+    "baseName": "trip_siwa_safari_1795599273291",
+    "width": 1200,
+    "height": 896,
+    "variants": {
+      "format": "webp",
+      "widths": [
+        480,
+        768,
+        1200
+      ],
+      "basePath": "assets/img/trip_siwa_safari_1795599273291"
+    },
+    "avgColor": "#a07547",
+    "bytesBefore": 897061,
+    "bytesAfter": 221900
+  }
+]

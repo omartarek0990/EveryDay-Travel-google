@@ -56,7 +56,13 @@ function SortableThumb({
       className="relative group rounded-xl border border-border bg-surface overflow-hidden"
     >
       <div className="aspect-[4/3] bg-surface-alt">
-        <ResilientImage src={image.url} alt="" className="w-full h-full object-cover" />
+        <ResilientImage
+          image={image}
+          alt=""
+          sizes="(min-width: 768px) 25vw, 50vw"
+          maxWidth={480}
+          className="w-full h-full object-cover"
+        />
       </div>
 
       {isCover && (

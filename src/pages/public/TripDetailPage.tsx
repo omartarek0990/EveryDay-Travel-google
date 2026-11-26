@@ -149,9 +149,11 @@ export function TripDetailPage() {
                 className="relative w-full aspect-[4/3] rounded-2xl overflow-hidden bg-surface-alt border border-border block group text-start"
               >
                 <ResilientImage
-                  src={currentImg?.url}
+                  image={currentImg}
                   alt={title.text}
                   loading="eager"
+                  sizes="(min-width: 1024px) 58vw, 100vw"
+                  maxWidth={1600}
                   className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.01]"
                 />
                 {badge?.text && (
@@ -179,8 +181,10 @@ export function TripDetailPage() {
                       }`}
                     >
                       <ResilientImage
-                        src={item.image?.url}
+                        image={item.image}
                         alt={title.text}
+                        sizes="20vw"
+                        maxWidth={480}
                         className="w-full h-full object-cover"
                       />
                     </button>

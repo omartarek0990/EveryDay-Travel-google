@@ -54,99 +54,117 @@ function createSeedDatabase() {
       id: "img-hero-dahab",
       provider: "STATIC",
       publicId: "seed/hero_dahab_redsea",
-      url: "/src/assets/images/hero_dahab_redsea_1795599272813.jpg",
-      width: 1408,
+      url: "/assets/img/hero_dahab_redsea_1795599272813-w1200.webp",
+      width: 1376,
       height: 768,
-      bytes: 28e4,
-      format: "jpg",
+      bytes: 221002,
+      format: "webp",
+      variants: { format: "webp", widths: [480, 768, 1200], basePath: "assets/img/hero_dahab_redsea_1795599272813" },
+      avgColor: "#9d9787",
       createdAt: now
     },
     {
       id: "img-hero-siwa",
       provider: "STATIC",
       publicId: "seed/hero_siwa_oasis",
-      url: "/src/assets/images/hero_siwa_oasis_1795599273206.jpg",
-      width: 1408,
+      url: "/assets/img/hero_siwa_oasis_1795599273206-w1200.webp",
+      width: 1376,
       height: 768,
-      bytes: 295e3,
-      format: "jpg",
+      bytes: 153296,
+      format: "webp",
+      variants: { format: "webp", widths: [480, 768, 1200], basePath: "assets/img/hero_siwa_oasis_1795599273206" },
+      avgColor: "#987d5d",
       createdAt: now
     },
     {
       id: "img-trip-dahab",
       provider: "STATIC",
       publicId: "seed/trip_dahab_snorkeling",
-      url: "/src/assets/images/trip_dahab_snorkeling_1795599274928.jpg",
-      width: 1280,
-      height: 960,
-      bytes: 26e4,
-      format: "jpg",
+      url: "/assets/img/trip_dahab_snorkeling_1795599274928-w1200.webp",
+      width: 1200,
+      height: 896,
+      bytes: 378218,
+      format: "webp",
+      variants: { format: "webp", widths: [480, 768, 1200], basePath: "assets/img/trip_dahab_snorkeling_1795599274928" },
+      avgColor: "#80928a",
       createdAt: now
     },
     {
       id: "img-trip-siwa",
       provider: "STATIC",
       publicId: "seed/trip_siwa_safari",
-      url: "/src/assets/images/trip_siwa_safari_1795599273291.jpg",
-      width: 1280,
-      height: 960,
-      bytes: 25e4,
-      format: "jpg",
+      url: "/assets/img/trip_siwa_safari_1795599273291-w1200.webp",
+      width: 1200,
+      height: 896,
+      bytes: 221900,
+      format: "webp",
+      variants: { format: "webp", widths: [480, 768, 1200], basePath: "assets/img/trip_siwa_safari_1795599273291" },
+      avgColor: "#a07547",
       createdAt: now
     },
     {
       id: "img-trip-alex",
       provider: "STATIC",
       publicId: "seed/trip_alexandria_corniche",
-      url: "/src/assets/images/trip_alexandria_corniche_1795599275506.jpg",
-      width: 1280,
-      height: 960,
-      bytes: 245e3,
-      format: "jpg",
+      url: "/assets/img/trip_alexandria_corniche_1795599275506-w1200.webp",
+      width: 1200,
+      height: 896,
+      bytes: 299936,
+      format: "webp",
+      variants: { format: "webp", widths: [480, 768, 1200], basePath: "assets/img/trip_alexandria_corniche_1795599275506" },
+      avgColor: "#9c9c94",
       createdAt: now
     },
     {
       id: "img-gallery-nuweiba",
       provider: "STATIC",
       publicId: "seed/gallery_nuweiba_camp",
-      url: "/src/assets/images/gallery_nuweiba_camp_1795599275538.jpg",
-      width: 1280,
-      height: 960,
-      bytes: 24e4,
-      format: "jpg",
+      url: "/assets/img/gallery_nuweiba_camp_1795599275538-w1200.webp",
+      width: 1200,
+      height: 896,
+      bytes: 253030,
+      format: "webp",
+      variants: { format: "webp", widths: [480, 768, 1200], basePath: "assets/img/gallery_nuweiba_camp_1795599275538" },
+      avgColor: "#5b483f",
       createdAt: now
     },
     {
       id: "img-hero-catherine",
       provider: "STATIC",
       publicId: "seed/hero_saint_catherine_snow",
-      url: "/src/assets/images/hero_saint_catherine_snow_1795616932524.jpg",
-      width: 1408,
+      url: "/assets/img/hero_saint_catherine_snow_1795616932524-w1200.webp",
+      width: 1376,
       height: 768,
-      bytes: 31e4,
-      format: "jpg",
+      bytes: 320184,
+      format: "webp",
+      variants: { format: "webp", widths: [480, 768, 1200], basePath: "assets/img/hero_saint_catherine_snow_1795616932524" },
+      avgColor: "#89858a",
       createdAt: now
     },
     {
       id: "img-hero-siwa-4x4",
       provider: "STATIC",
       publicId: "seed/hero_siwa_4x4",
-      url: "/src/assets/images/hero_siwa_4x4_1795616932838.jpg",
-      width: 1408,
+      url: "/assets/img/hero_siwa_4x4_1795616932838-w1200.webp",
+      width: 1376,
       height: 768,
-      bytes: 295e3,
-      format: "jpg",
+      bytes: 105196,
+      format: "webp",
+      variants: { format: "webp", widths: [480, 768, 1200], basePath: "assets/img/hero_siwa_4x4_1795616932838" },
+      avgColor: "#965e2d",
       createdAt: now
     },
     {
       id: "img-hero-farsha",
       provider: "STATIC",
       publicId: "seed/hero_farsha_sharm",
-      url: "/src/assets/images/hero_farsha_sharm_1795616934669.jpg",
-      width: 1408,
+      url: "/assets/img/hero_farsha_sharm_1795616934669-w1200.webp",
+      width: 1376,
       height: 768,
-      bytes: 32e4,
-      format: "jpg",
+      bytes: 222090,
+      format: "webp",
+      variants: { format: "webp", widths: [480, 768, 1200], basePath: "assets/img/hero_farsha_sharm_1795616934669" },
+      avgColor: "#504042",
       createdAt: now
     }
   ];
@@ -599,8 +617,19 @@ function toSnakeImage(image) {
     height: image.height,
     bytes: image.bytes,
     format: image.format,
+    variants: image.variants ?? null,
+    avg_color: image.avgColor ?? null,
     created_at: image.createdAt
   };
+}
+function asImageVariants(value) {
+  if (!value || typeof value !== "object") return null;
+  const raw = value;
+  const format = raw.format === "webp" || raw.format === "jpg" ? raw.format : null;
+  const basePath = typeof raw.basePath === "string" ? raw.basePath : "";
+  const widths = Array.isArray(raw.widths) ? raw.widths.filter((width) => typeof width === "number" && width > 0) : [];
+  if (!format || !basePath || widths.length === 0) return null;
+  return { format, widths, basePath };
 }
 function fromSnakeImage(row) {
   return {
@@ -612,6 +641,8 @@ function fromSnakeImage(row) {
     height: asNumber(row.height, 1200),
     bytes: asNumber(row.bytes, 0),
     format: asString(row.format, "jpg"),
+    variants: asImageVariants(row.variants),
+    avgColor: typeof row.avg_color === "string" ? row.avg_color : null,
     createdAt: asString(row.created_at, (/* @__PURE__ */ new Date()).toISOString())
   };
 }
@@ -1246,6 +1277,25 @@ function extensionFor(options) {
 function sanitizeFolder(folder) {
   return folder.replace(/[^a-z0-9/_-]/gi, "").replace(/^\/+|\/+$/g, "").slice(0, 120) || "everyday";
 }
+function sanitizeUploadKey(key) {
+  if (!key) return null;
+  const cleaned = key.replace(/[^a-z0-9-]/gi, "").toLowerCase().slice(0, 80);
+  return /^[a-z0-9][a-z0-9-]{5,79}$/.test(cleaned) ? cleaned : null;
+}
+function imageVariantObjectId(provider, basePublicId, width, format) {
+  const base = basePublicId.replace(/\.[a-z0-9]{2,5}$/i, "");
+  if (provider === "STATIC") {
+    return `local/${base.replace(/^local\//, "")}-w${width}.${format}`;
+  }
+  return `${base}-w${width}.${format}`;
+}
+function imageVariantBasePath(provider, basePublicId) {
+  const base = basePublicId.replace(/\.[a-z0-9]{2,5}$/i, "");
+  if (provider === "STATIC") {
+    return `uploads/${base.replace(/^local\//, "")}`;
+  }
+  return base;
+}
 function getUploadTokenSecret() {
   return process.env.SESSION_SECRET || globalThis.__everydayUploadSecret || (globalThis.__everydayUploadSecret = crypto2.randomBytes(32).toString("hex"));
 }
@@ -1255,7 +1305,8 @@ var SupabaseStorage = class {
   }
   async signUpload(folder = "everyday", options) {
     const bucket = getStorageBucket();
-    const objectPath = `${sanitizeFolder(folder)}/${crypto2.randomUUID()}.${extensionFor(options)}`;
+    const key = sanitizeUploadKey(options?.key) ?? crypto2.randomUUID();
+    const objectPath = `${sanitizeFolder(folder)}/${key}.${extensionFor(options)}`;
     const { data, error } = await getSupabaseAdmin().storage.from(bucket).createSignedUploadUrl(objectPath);
     if (error || !data) {
       throw new Error(`Failed to sign Supabase upload: ${error?.message ?? "unknown error"}`);
@@ -1308,6 +1359,18 @@ var SupabaseStorage = class {
     if (error) {
       console.error(`[ImageStorage] Supabase remove failed for ${publicId}: ${error.message}`);
     }
+  }
+  async exists(publicId) {
+    const bucket = getStorageBucket();
+    const slash = publicId.lastIndexOf("/");
+    const dir = slash >= 0 ? publicId.slice(0, slash) : "";
+    const name = slash >= 0 ? publicId.slice(slash + 1) : publicId;
+    const { data, error } = await getSupabaseAdmin().storage.from(bucket).list(dir, { search: name, limit: 100 });
+    if (error) {
+      console.error(`[ImageStorage] Supabase exists check failed for ${publicId}: ${error.message}`);
+      return false;
+    }
+    return (data ?? []).some((item) => item.name === name);
   }
   url(image) {
     return image.url;
@@ -1392,6 +1455,10 @@ var CloudinaryStorage = class {
       console.error(`[ImageStorage] Cloudinary destroy error for ${publicId}:`, err);
     }
   }
+  /** Cloudinary URLs are transformed on the fly, so the app never stores variants there. */
+  async exists() {
+    return false;
+  }
   url(image, opts) {
     if (image.provider !== "CLOUDINARY") return image.url;
     const { cloudName } = this.config;
@@ -1403,10 +1470,11 @@ var StaticStorage = class {
   constructor() {
     this.provider = "STATIC";
   }
-  async signUpload(folder = "everyday") {
+  async signUpload(folder = "everyday", options) {
     const exp = String(Date.now() + 5 * 60 * 1e3);
     const nonce = crypto2.randomBytes(12).toString("hex");
-    const sig = crypto2.createHmac("sha256", getUploadTokenSecret()).update(`${folder}:${exp}:${nonce}`).digest("hex");
+    const key = sanitizeUploadKey(options?.key);
+    const sig = crypto2.createHmac("sha256", getUploadTokenSecret()).update(`${folder}:${key ?? ""}:${exp}:${nonce}`).digest("hex");
     return {
       provider: "STATIC",
       uploadUrl: "/api/uploads/local",
@@ -1414,17 +1482,23 @@ var StaticStorage = class {
         folder,
         exp,
         nonce,
-        signature: sig
+        signature: sig,
+        ...key ? { key } : {}
       }
     };
   }
   verifyUploadSignature(fields) {
     const expNum = Number(fields.exp);
     if (!Number.isFinite(expNum) || Date.now() > expNum) return false;
-    const expected = crypto2.createHmac("sha256", getUploadTokenSecret()).update(`${fields.folder}:${fields.exp}:${fields.nonce}`).digest("hex");
+    const expected = crypto2.createHmac("sha256", getUploadTokenSecret()).update(`${fields.folder}:${fields.key ?? ""}:${fields.exp}:${fields.nonce}`).digest("hex");
     const a = Buffer.from(expected, "utf8");
     const b = Buffer.from(fields.signature || "", "utf8");
     return a.length === b.length && crypto2.timingSafeEqual(a, b);
+  }
+  async exists(publicId) {
+    if (!publicId.startsWith("local/")) return false;
+    const resolved = path.resolve(LOCAL_UPLOAD_DIR, publicId.slice("local/".length));
+    return resolved.startsWith(LOCAL_UPLOAD_DIR + path.sep) && fs.existsSync(resolved);
   }
   async verify(publicId) {
     if (!publicId.startsWith("local/")) {
@@ -2256,8 +2330,9 @@ function createApiRouter() {
       const folder = typeof req.body?.folder === "string" ? req.body.folder.replace(/[^a-z0-9/_-]/gi, "") : "everyday";
       const fileName = typeof req.body?.fileName === "string" ? req.body.fileName : void 0;
       const mimeType = typeof req.body?.mimeType === "string" ? req.body.mimeType : void 0;
+      const key = typeof req.body?.key === "string" ? req.body.key : void 0;
       const storage = getImageStorage();
-      res.json(await storage.signUpload(folder || "everyday", { fileName, mimeType }));
+      res.json(await storage.signUpload(folder || "everyday", { fileName, mimeType, key }));
     })
   );
   router.post(
@@ -2269,7 +2344,8 @@ function createApiRouter() {
       const exp = String(req.headers["x-upload-exp"] || "");
       const nonce = String(req.headers["x-upload-nonce"] || "");
       const signature = String(req.headers["x-upload-signature"] || "");
-      if (!staticStorage.verifyUploadSignature({ folder, exp, nonce, signature })) {
+      const key = sanitizeUploadKey(String(req.headers["x-upload-key"] || "")) ?? void 0;
+      if (!staticStorage.verifyUploadSignature({ folder, exp, nonce, signature, key })) {
         res.status(403).json({ error: "\u062A\u0648\u0642\u064A\u0639 \u0627\u0644\u0631\u0641\u0639 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D \u0623\u0648 \u0645\u0646\u062A\u0647\u064A \u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0629" });
         return;
       }
@@ -2285,7 +2361,7 @@ function createApiRouter() {
         return;
       }
       const uploadDir = ensureLocalUploadDir();
-      const fileName = `${crypto3.randomUUID()}.${ext}`;
+      const fileName = `${key ?? crypto3.randomUUID()}.${ext}`;
       const targetPath = path2.resolve(uploadDir, fileName);
       if (!targetPath.startsWith(uploadDir + path2.sep)) {
         res.status(400).json({ error: "\u0645\u0633\u0627\u0631 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D" });
@@ -2311,7 +2387,12 @@ function createApiRouter() {
       const schema = z2.object({
         publicId: z2.string().min(1),
         widthHint: z2.number().int().positive().max(2560).optional(),
-        heightHint: z2.number().int().positive().max(2560).optional()
+        heightHint: z2.number().int().positive().max(2560).optional(),
+        avgColor: z2.string().regex(/^#[0-9a-f]{6}$/i).nullish(),
+        variants: z2.object({
+          format: z2.enum(["webp", "jpg"]),
+          widths: z2.array(z2.number().int().positive()).min(1).max(6)
+        }).nullish()
       });
       const parsed = schema.safeParse(req.body);
       if (!parsed.success) {
@@ -2322,6 +2403,27 @@ function createApiRouter() {
         const storage = getImageStorage();
         const verified = await storage.verify(parsed.data.publicId);
         const useClientDimensions = verified.provider !== "CLOUDINARY";
+        const sourceWidth = parsed.data.widthHint ?? verified.width;
+        let variants = null;
+        if (parsed.data.variants && verified.provider !== "CLOUDINARY") {
+          const format = parsed.data.variants.format;
+          const widths = Array.from(new Set(parsed.data.variants.widths)).filter((width) => width <= sourceWidth).sort((a, b) => a - b);
+          if (widths.length > 0) {
+            const objectIds = widths.map(
+              (width) => imageVariantObjectId(verified.provider, verified.publicId, width, format)
+            );
+            const found = await Promise.all(objectIds.map((objectId) => storage.exists(objectId)));
+            if (found.some((exists) => !exists)) {
+              res.status(400).json({ error: "\u062A\u0639\u0630\u0631 \u0627\u0644\u062A\u062D\u0642\u0642 \u0645\u0646 \u0646\u0633\u062E \u0627\u0644\u0635\u0648\u0631\u0629 \u0627\u0644\u0645\u0631\u0641\u0648\u0639\u0629" });
+              return;
+            }
+            variants = {
+              format,
+              widths,
+              basePath: imageVariantBasePath(verified.provider, verified.publicId)
+            };
+          }
+        }
         const image = {
           id: crypto3.randomUUID(),
           provider: verified.provider,
@@ -2334,6 +2436,8 @@ function createApiRouter() {
           height: useClientDimensions && parsed.data.heightHint ? parsed.data.heightHint : verified.height,
           bytes: verified.bytes,
           format: verified.format,
+          variants,
+          avgColor: parsed.data.avgColor ?? null,
           createdAt: (/* @__PURE__ */ new Date()).toISOString()
         };
         const db = getDb();
@@ -3019,7 +3123,7 @@ function createApp() {
   app2.get("/sitemap.xml", handleSitemapXml);
   try {
     const uploadsDir = ensureLocalUploadDir();
-    app2.use("/uploads", express2.static(uploadsDir, { maxAge: "30d" }));
+    app2.use("/uploads", express2.static(uploadsDir, { maxAge: "365d", immutable: true }));
   } catch (err) {
     console.warn("Skipping local uploads static directory:", err);
   }

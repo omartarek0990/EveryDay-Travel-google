@@ -54,10 +54,11 @@ export function createApp() {
   app.get('/robots.txt', handleRobotsTxt);
   app.get('/sitemap.xml', handleSitemapXml);
 
-  // Uploaded static images (only used when neither Supabase nor Cloudinary is configured)
+  // Uploaded static images (only used when neither Supabase nor Cloudinary is configured).
+  // File names are content-unique, so they can be cached for a year.
   try {
     const uploadsDir = ensureLocalUploadDir();
-    app.use('/uploads', express.static(uploadsDir, { maxAge: '30d' }));
+    app.use('/uploads', express.static(uploadsDir, { maxAge: '365d', immutable: true }));
   } catch (err) {
     console.warn('Skipping local uploads static directory:', err);
   }

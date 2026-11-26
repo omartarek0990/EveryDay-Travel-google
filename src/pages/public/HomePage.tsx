@@ -14,6 +14,7 @@ import { ResilientImage } from '../../components/ResilientImage';
 import { buildWhatsAppUrl, isSafeExternalHttpsUrl } from '../../shared/format';
 
 const TRIPS_PAGE_SIZE = 12;
+const GALLERY_PAGE_SIZE = 9;
 
 export function HomePage() {
   const { messages, t } = useI18n();
@@ -21,6 +22,7 @@ export function HomePage() {
   const location = useLocation();
   const [selectedDestSlug, setSelectedDestSlug] = useState<string>('all');
   const [visibleTripsCount, setVisibleTripsCount] = useState<number>(TRIPS_PAGE_SIZE);
+  const [visibleGalleryCount, setVisibleGalleryCount] = useState<number>(GALLERY_PAGE_SIZE);
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
 
   useEffect(() => {
@@ -90,6 +92,9 @@ export function HomePage() {
     Boolean(address.text) ||
     socials.length > 0;
 
+  const shownGallery = galleryImages.slice(0, visibleGalleryCount);
+  const hasMoreGallery = galleryImages.length > visibleGalleryCount;
+
   const lightboxItems: LightboxItem[] = galleryImages.map((item) => {
     const cap = item.caption ? t(item.caption) : null;
     return {
@@ -97,6 +102,7 @@ export function HomePage() {
       alt: cap?.text || companyName.text,
       caption: cap?.text,
       captionIsFallbackAr: cap?.isFallbackAr,
+      image: item.image ?? null,
     };
   });
 
@@ -219,7 +225,7 @@ export function HomePage() {
       {/* 3. Gallery Section (full gallery with Lightbox) */}
       <section
         id="gallery"
-        className="scroll-mt-20 md:scroll-mt-24 py-16 sm:py-24 bg-surface-alt border-y border-border"
+        className="cv-auto scroll-mt-20 md:scroll-mt-24 py-16 sm:py-24 bg-surface-alt border-y border-border"
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="max-w-2xl mb-10">
@@ -243,7 +249,7 @@ export function HomePage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {galleryImages.map((item, idx) => {
+              {shownGallery.map((item, idx) => {
                 const cap = item.caption ? t(item.caption) : null;
                 return (
                   <button
@@ -253,8 +259,10 @@ export function HomePage() {
                     className="group relative aspect-[4/3] rounded-2xl overflow-hidden bg-surface border border-border text-start"
                   >
                     <ResilientImage
-                      src={item.image?.url}
+                      image={item.image}
                       alt={cap?.text || companyName.text}
+                      sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
+                      maxWidth={1200}
                       className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                     />
                     {cap?.text && (
@@ -273,11 +281,23 @@ export function HomePage() {
               })}
             </div>
           )}
+
+          {hasMoreGallery && (
+            <div className="mt-10 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setVisibleGalleryCount((count) => count + GALLERY_PAGE_SIZE)}
+                className="px-6 py-3 rounded-xl border border-border bg-surface hover:bg-surface-alt text-ink font-semibold text-sm transition-colors"
+              >
+                {messages.actions.showMore}
+              </button>
+            </div>
+          )}
         </div>
       </section>
 
       {/* 4. About Us Section (story + 4-pillar banner + Why everyDay) */}
-      <section id="about" className="scroll-mt-20 md:scroll-mt-24 bg-surface">
+      <section id="about" className="cv-auto scroll-mt-20 md:scroll-mt-24 bg-surface">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-16 sm:pt-20 pb-12 sm:pb-14">
           <div className="max-w-3xl">
             <h2
@@ -344,7 +364,7 @@ export function HomePage() {
       {/* 5. Contact Us Section */}
       <section
         id="contact"
-        className="scroll-mt-20 md:scroll-mt-24 py-16 sm:py-24 bg-surface-alt border-t border-border"
+        className="cv-auto scroll-mt-20 md:scroll-mt-24 py-16 sm:py-24 bg-surface-alt border-t border-border"
       >
         <div className="max-w-5xl mx-auto px-4 sm:px-6 space-y-10">
           <div className="max-w-2xl">

@@ -29,7 +29,7 @@ import {
   type AuthenticatedRequest,
 } from './auth.ts';
 import { buildPublicPayload, getDb, hydrateTrips, saveDb } from './db.ts';
-import { ensureLocalUploadDir, getImageStorage, staticStorage } from './storage.ts';
+import { ensureLocalUploadDir, getImageStorage, imageVariantBasePath, imageVariantObjectId, sanitizeUploadKey, staticStorage } from './storage.ts';
 import { translateEntriesBatch } from './translation.ts';
 import {
   changePasswordSchema,
@@ -445,8 +445,9 @@ export function createApiRouter(): Router {
           : 'everyday';
       const fileName = typeof req.body?.fileName === 'string' ? req.body.fileName : undefined;
       const mimeType = typeof req.body?.mimeType === 'string' ? req.body.mimeType : undefined;
+      const key = typeof req.body?.key === 'string' ? req.body.key : undefined;
       const storage = getImageStorage();
-      res.json(await storage.signUpload(folder || 'everyday', { fileName, mimeType }));
+      res.json(await storage.signUpload(folder || 'everyday', { fileName, mimeType, key }));
     })
   );
 
@@ -459,8 +460,9 @@ export function createApiRouter(): Router {
       const exp = String(req.headers['x-upload-exp'] || '');
       const nonce = String(req.headers['x-upload-nonce'] || '');
       const signature = String(req.headers['x-upload-signature'] || '');
+      const key = sanitizeUploadKey(String(req.headers['x-upload-key'] || '')) ?? undefined;
 
-      if (!staticStorage.verifyUploadSignature({ folder, exp, nonce, signature })) {
+      if (!staticStorage.verifyUploadSignature({ folder, exp, nonce, signature, key })) {
         res.status(403).json({ error: 'توقيع الرفع غير صالح أو منتهي الصلاحية' });
         return;
       }
@@ -479,7 +481,7 @@ export function createApiRouter(): Router {
       }
 
       const uploadDir = ensureLocalUploadDir();
-      const fileName = `${crypto.randomUUID()}.${ext}`;
+      const fileName = `${key ?? crypto.randomUUID()}.${ext}`;
       const targetPath = path.resolve(uploadDir, fileName);
       if (!targetPath.startsWith(uploadDir + path.sep)) {
         res.status(400).json({ error: 'مسار غير صالح' });
@@ -509,6 +511,16 @@ export function createApiRouter(): Router {
         publicId: z.string().min(1),
         widthHint: z.number().int().positive().max(2560).optional(),
         heightHint: z.number().int().positive().max(2560).optional(),
+        avgColor: z
+          .string()
+          .regex(/^#[0-9a-f]{6}$/i)
+          .nullish(),
+        variants: z
+          .object({
+            format: z.enum(['webp', 'jpg']),
+            widths: z.array(z.number().int().positive()).min(1).max(6),
+          })
+          .nullish(),
       });
       const parsed = schema.safeParse(req.body);
       if (!parsed.success) {
@@ -520,6 +532,35 @@ export function createApiRouter(): Router {
         const storage = getImageStorage();
         const verified = await storage.verify(parsed.data.publicId);
         const useClientDimensions = verified.provider !== 'CLOUDINARY';
+        const sourceWidth = parsed.data.widthHint ?? verified.width;
+
+        // Responsive variants are optional: old clients never send them, so the
+        // row keeps a single original URL. When variants are declared we refuse
+        // the row unless every variant object really exists in storage.
+        let variants: ImageRecord['variants'] = null;
+        if (parsed.data.variants && verified.provider !== 'CLOUDINARY') {
+          const format = parsed.data.variants.format;
+          const widths = Array.from(new Set(parsed.data.variants.widths))
+            .filter((width) => width <= sourceWidth)
+            .sort((a, b) => a - b);
+
+          if (widths.length > 0) {
+            const objectIds = widths.map((width) =>
+              imageVariantObjectId(verified.provider, verified.publicId, width, format)
+            );
+            const found = await Promise.all(objectIds.map((objectId) => storage.exists(objectId)));
+            if (found.some((exists) => !exists)) {
+              res.status(400).json({ error: 'تعذر التحقق من نسخ الصورة المرفوعة' });
+              return;
+            }
+            variants = {
+              format,
+              widths,
+              basePath: imageVariantBasePath(verified.provider, verified.publicId),
+            };
+          }
+        }
+
         const image: ImageRecord = {
           id: crypto.randomUUID(),
           provider: verified.provider,
@@ -534,6 +575,8 @@ export function createApiRouter(): Router {
             useClientDimensions && parsed.data.heightHint ? parsed.data.heightHint : verified.height,
           bytes: verified.bytes,
           format: verified.format,
+          variants,
+          avgColor: parsed.data.avgColor ?? null,
           createdAt: new Date().toISOString(),
         };
 

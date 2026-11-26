@@ -117,9 +117,11 @@ export function TripCard({
               >
                 {shouldLoad && (
                   <ResilientImage
-                    src={item.image?.url}
+                    image={item.image}
                     alt={title.text}
                     loading={idx === 0 ? 'eager' : 'lazy'}
+                    sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
+                    maxWidth={1200}
                     className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
                   />
                 )}
@@ -127,7 +129,7 @@ export function TripCard({
             );
           })
         ) : (
-          <ResilientImage src={null} alt={title.text} className="w-full h-full" />
+          <ResilientImage src={null} alt={title.text} className="w-full h-full" aspectClass="aspect-[4/3]" />
         )}
 
         {/* Scrim */}

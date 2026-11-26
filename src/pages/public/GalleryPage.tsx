@@ -33,6 +33,7 @@ export function GalleryPage() {
       alt: cap?.text || companyName.text,
       caption: cap?.text,
       captionIsFallbackAr: cap?.isFallbackAr,
+      image: item.image ?? null,
     };
   });
 
@@ -71,8 +72,10 @@ export function GalleryPage() {
                     className="group relative aspect-[4/3] rounded-2xl overflow-hidden bg-surface-alt border border-border text-start"
                   >
                     <ResilientImage
-                      src={item.image?.url}
+                      image={item.image}
                       alt={cap?.text || companyName.text}
+                      sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
+                      maxWidth={1200}
                       className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                     />
                     {cap?.text && (

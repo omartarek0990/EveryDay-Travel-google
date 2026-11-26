@@ -22,8 +22,13 @@ export interface VerifiedImageMetadata {
 
 export interface ImageStorage {
   readonly provider: 'SUPABASE' | 'CLOUDINARY' | 'STATIC';
-  signUpload(folder?: string, options?: { fileName?: string; mimeType?: string }): Promise<UploadSignatureResult>;
+  signUpload(
+    folder?: string,
+    options?: { fileName?: string; mimeType?: string; key?: string }
+  ): Promise<UploadSignatureResult>;
   verify(publicId: string): Promise<VerifiedImageMetadata>;
+  /** True when the object exists in this storage provider. */
+  exists(publicId: string): Promise<boolean>;
   destroy(publicId: string): Promise<void>;
   url(image: Pick<ImageRecord, 'provider' | 'publicId' | 'url'>, opts?: { width?: number }): string;
 }
@@ -58,6 +63,43 @@ function sanitizeFolder(folder: string): string {
   );
 }
 
+/** Object keys proposed by the client (a random id plus a `-w<width>` suffix). */
+export function sanitizeUploadKey(key: string | undefined): string | null {
+  if (!key) return null;
+  const cleaned = key.replace(/[^a-z0-9-]/gi, '').toLowerCase().slice(0, 80);
+  return /^[a-z0-9][a-z0-9-]{5,79}$/.test(cleaned) ? cleaned : null;
+}
+
+/**
+ * Storage object id of one responsive variant. Kept in sync with the URL rules
+ * in src/lib/image-url.ts (Supabase: `<basePath>-w<w>.<format>`, static files:
+ * `local/<key>-w<w>.<format>` served from `/uploads`).
+ */
+export function imageVariantObjectId(
+  provider: ImageRecord['provider'],
+  basePublicId: string,
+  width: number,
+  format: 'webp' | 'jpg'
+): string {
+  const base = basePublicId.replace(/\.[a-z0-9]{2,5}$/i, '');
+  if (provider === 'STATIC') {
+    return `local/${base.replace(/^local\//, '')}-w${width}.${format}`;
+  }
+  return `${base}-w${width}.${format}`;
+}
+
+/** `basePath` stored on the image row, used by the client to build variant URLs. */
+export function imageVariantBasePath(
+  provider: ImageRecord['provider'],
+  basePublicId: string
+): string {
+  const base = basePublicId.replace(/\.[a-z0-9]{2,5}$/i, '');
+  if (provider === 'STATIC') {
+    return `uploads/${base.replace(/^local\//, '')}`;
+  }
+  return base;
+}
+
 function getUploadTokenSecret(): string {
   return process.env.SESSION_SECRET || globalThis.__everydayUploadSecret || (globalThis.__everydayUploadSecret = crypto.randomBytes(32).toString('hex'));
 }
@@ -71,10 +113,11 @@ class SupabaseStorage implements ImageStorage {
 
   async signUpload(
     folder = 'everyday',
-    options?: { fileName?: string; mimeType?: string }
+    options?: { fileName?: string; mimeType?: string; key?: string }
   ): Promise<UploadSignatureResult> {
     const bucket = getStorageBucket();
-    const objectPath = `${sanitizeFolder(folder)}/${crypto.randomUUID()}.${extensionFor(options)}`;
+    const key = sanitizeUploadKey(options?.key) ?? crypto.randomUUID();
+    const objectPath = `${sanitizeFolder(folder)}/${key}.${extensionFor(options)}`;
     const { data, error } = await getSupabaseAdmin()
       .storage.from(bucket)
       .createSignedUploadUrl(objectPath);
@@ -148,6 +191,21 @@ class SupabaseStorage implements ImageStorage {
     if (error) {
       console.error(`[ImageStorage] Supabase remove failed for ${publicId}: ${error.message}`);
     }
+  }
+
+  async exists(publicId: string): Promise<boolean> {
+    const bucket = getStorageBucket();
+    const slash = publicId.lastIndexOf('/');
+    const dir = slash >= 0 ? publicId.slice(0, slash) : '';
+    const name = slash >= 0 ? publicId.slice(slash + 1) : publicId;
+    const { data, error } = await getSupabaseAdmin()
+      .storage.from(bucket)
+      .list(dir, { search: name, limit: 100 });
+    if (error) {
+      console.error(`[ImageStorage] Supabase exists check failed for ${publicId}: ${error.message}`);
+      return false;
+    }
+    return (data ?? []).some((item) => item.name === name);
   }
 
   url(image: Pick<ImageRecord, 'provider' | 'publicId' | 'url'>): string {
@@ -260,6 +318,11 @@ class CloudinaryStorage implements ImageStorage {
     }
   }
 
+  /** Cloudinary URLs are transformed on the fly, so the app never stores variants there. */
+  async exists(): Promise<boolean> {
+    return false;
+  }
+
   url(image: Pick<ImageRecord, 'provider' | 'publicId' | 'url'>, opts?: { width?: number }): string {
     if (image.provider !== 'CLOUDINARY') return image.url;
     const { cloudName } = this.config;
@@ -271,12 +334,16 @@ class CloudinaryStorage implements ImageStorage {
 class StaticStorage implements ImageStorage {
   readonly provider = 'STATIC' as const;
 
-  async signUpload(folder = 'everyday'): Promise<UploadSignatureResult> {
+  async signUpload(
+    folder = 'everyday',
+    options?: { fileName?: string; mimeType?: string; key?: string }
+  ): Promise<UploadSignatureResult> {
     const exp = String(Date.now() + 5 * 60 * 1000);
     const nonce = crypto.randomBytes(12).toString('hex');
+    const key = sanitizeUploadKey(options?.key);
     const sig = crypto
       .createHmac('sha256', getUploadTokenSecret())
-      .update(`${folder}:${exp}:${nonce}`)
+      .update(`${folder}:${key ?? ''}:${exp}:${nonce}`)
       .digest('hex');
 
     return {
@@ -287,20 +354,33 @@ class StaticStorage implements ImageStorage {
         exp,
         nonce,
         signature: sig,
+        ...(key ? { key } : {}),
       },
     };
   }
 
-  verifyUploadSignature(fields: { folder: string; exp: string; nonce: string; signature: string }): boolean {
+  verifyUploadSignature(fields: {
+    folder: string;
+    exp: string;
+    nonce: string;
+    signature: string;
+    key?: string;
+  }): boolean {
     const expNum = Number(fields.exp);
     if (!Number.isFinite(expNum) || Date.now() > expNum) return false;
     const expected = crypto
       .createHmac('sha256', getUploadTokenSecret())
-      .update(`${fields.folder}:${fields.exp}:${fields.nonce}`)
+      .update(`${fields.folder}:${fields.key ?? ''}:${fields.exp}:${fields.nonce}`)
       .digest('hex');
     const a = Buffer.from(expected, 'utf8');
     const b = Buffer.from(fields.signature || '', 'utf8');
     return a.length === b.length && crypto.timingSafeEqual(a, b);
+  }
+
+  async exists(publicId: string): Promise<boolean> {
+    if (!publicId.startsWith('local/')) return false;
+    const resolved = path.resolve(LOCAL_UPLOAD_DIR, publicId.slice('local/'.length));
+    return resolved.startsWith(LOCAL_UPLOAD_DIR + path.sep) && fs.existsSync(resolved);
   }
 
   async verify(publicId: string): Promise<VerifiedImageMetadata> {

@@ -37,6 +37,19 @@ export interface LoginAttemptRecord {
   createdAt: string;
 }
 
+export type ImageVariantFormat = 'webp' | 'jpg';
+
+/**
+ * Responsive variants generated at upload time for one image record.
+ * `basePath` is the storage path *without* the `-w<width>.<format>` suffix,
+ * so a variant lives at `<basePath>-w<width>.<format>`.
+ */
+export interface ImageVariants {
+  format: ImageVariantFormat;
+  widths: number[];
+  basePath: string;
+}
+
 export interface ImageRecord {
   id: string;
   provider: ImageProvider;
@@ -46,6 +59,10 @@ export interface ImageRecord {
   height: number;
   bytes: number;
   format: string;
+  /** Null for images uploaded before variants existed, or when storage cannot derive variant URLs. */
+  variants: ImageVariants | null;
+  /** CSS hex color sampled from the image, used as a loading placeholder. */
+  avgColor: string | null;
   createdAt: string;
 }
 
