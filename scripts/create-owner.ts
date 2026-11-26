@@ -1,9 +1,7 @@
 import 'dotenv/config';
-import crypto from 'node:crypto';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
-import { getDb, saveDb } from '../server/db.ts';
-import { hashPassword } from '../server/auth.ts';
+import { createUser, findOwnerByUsername, hashPassword } from '../server/auth.ts';
 import { validatePasswordStrength } from '../src/shared/schemas.ts';
 
 async function main() {
@@ -36,22 +34,14 @@ async function main() {
       process.exit(1);
     }
 
-    const db = getDb();
-    if (db.users.some((u) => u.username === username)) {
+    const existing = await findOwnerByUsername(username);
+    if (existing) {
       console.error(`User "${username}" already exists.`);
       process.exit(1);
     }
 
     const passwordHash = await hashPassword(password);
-    db.users.push({
-      id: crypto.randomUUID(),
-      username,
-      passwordHash,
-      role: 'OWNER',
-      mustChangePassword: false,
-      createdAt: new Date().toISOString(),
-    });
-    saveDb(db);
+    await createUser({ username, passwordHash, role: 'OWNER', mustChangePassword: false });
     console.log(`Owner account "${username}" created successfully.`);
   } finally {
     rl.close();

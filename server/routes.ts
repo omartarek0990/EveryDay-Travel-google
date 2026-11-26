@@ -1,21 +1,30 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import express, { type Router } from 'express';
+import express, { type NextFunction, type Request, type Response, type Router } from 'express';
 import { z } from 'zod';
 import {
   clearFailedLogins,
+  countOwners,
   createSessionForUser,
+  createUser,
+  deleteAllSessions,
   deleteOtherSessions,
   deleteSessionByToken,
+  extractTokenFromRequest,
+  findFirstOwner,
+  findOwnerByUsername,
+  findUserById,
   getClientIp,
   hashPassword,
   isLoginLocked,
   recordFailedLogin,
   requireOwner,
+  resolveOwnerFromRequest,
   runDummyHashCheck,
   setSessionCookie,
   clearSessionCookie,
+  updateUser,
   verifyPassword,
   type AuthenticatedRequest,
 } from './auth.ts';
@@ -49,6 +58,14 @@ const ALLOWED_IMAGE_MIME_TO_EXT: Record<string, string> = {
 };
 
 const signRateWindow = new Map<string, { count: number; resetAt: number }>();
+
+function asyncHandler<Req extends Request = Request>(
+  fn: (req: Req, res: Response, next: NextFunction) => Promise<unknown>
+) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    Promise.resolve(fn(req as Req, res, next)).catch(next);
+  };
+}
 
 function checkSignRateLimit(key: string): boolean {
   const now = Date.now();
@@ -96,7 +113,7 @@ async function cleanupOrphanImages(imageIds: string[]): Promise<void> {
     }
   }
   db.images = remaining;
-  saveDb(db);
+  await saveDb(db);
 }
 
 export function createApiRouter(): Router {
@@ -109,350 +126,329 @@ export function createApiRouter(): Router {
   });
 
   // ---- AUTH ----
-  router.get('/auth/me', (req, res) => {
-    const db = getDb();
-    const needsSetup = db.users.filter((u) => u.role === 'OWNER').length === 0;
+  router.get(
+    '/auth/me',
+    asyncHandler(async (req, res) => {
+      const needsSetup = (await countOwners()) === 0;
+      const user = await resolveOwnerFromRequest(req);
+      const recoveryConfigured = Boolean(process.env.OWNER_RECOVERY_CODE?.trim());
 
-    // Check optional current session without throwing 401
-    let currentUser: {
-      id: string;
-      username: string;
-      role: string;
-      mustChangePassword: boolean;
-    } | null = null;
-
-    const authHeader = req.headers.authorization;
-    const cookieHeader = req.headers.cookie;
-    let rawToken: string | null = null;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      rawToken = authHeader.slice('Bearer '.length).trim();
-    } else if (cookieHeader) {
-      for (const part of cookieHeader.split(';')) {
-        const idx = part.indexOf('=');
-        if (idx === -1) continue;
-        const k = part.slice(0, idx).trim();
-        const v = part.slice(idx + 1).trim();
-        if (k === '__Host-session' || k === 'ed_session') {
-          rawToken = decodeURIComponent(v);
-          break;
-        }
-      }
-    }
-
-    if (rawToken) {
-      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-      const now = Date.now();
-      const session = db.sessions.find(
-        (s) => s.tokenHash === tokenHash && new Date(s.expiresAt).getTime() > now
-      );
-      if (session) {
-        const user = db.users.find((u) => u.id === session.userId && u.role === 'OWNER');
-        if (user) {
-          currentUser = {
-            id: user.id,
-            username: user.username,
-            role: user.role,
-            mustChangePassword: user.mustChangePassword,
-          };
-        }
-      }
-    }
-
-    const recoveryConfigured = Boolean(process.env.OWNER_RECOVERY_CODE?.trim());
-    res.json({ needsSetup, recoveryConfigured, user: currentUser });
-  });
-
-  router.post('/auth/setup', async (req, res) => {
-    const db = getDb();
-    if (db.users.some((u) => u.role === 'OWNER')) {
-      res.status(409).json({ error: 'تم إعداد حساب المالك بالفعل.' });
-      return;
-    }
-
-    const parsed = setupOwnerSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.issues[0]?.message || 'بيانات غير صالحة' });
-      return;
-    }
-
-    const pwError = validatePasswordStrength(parsed.data.password, parsed.data.username);
-    if (pwError) {
-      res.status(400).json({ error: pwError });
-      return;
-    }
-
-    const passwordHash = await hashPassword(parsed.data.password);
-    const user = {
-      id: crypto.randomUUID(),
-      username: parsed.data.username,
-      passwordHash,
-      role: 'OWNER' as const,
-      mustChangePassword: false,
-      createdAt: new Date().toISOString(),
-    };
-    db.users.push(user);
-    saveDb(db);
-
-    const { token } = createSessionForUser(user.id);
-    setSessionCookie(req, res, token);
-    res.status(201).json({
-      token,
-      user: {
-        id: user.id,
-        username: user.username,
-        role: user.role,
-        mustChangePassword: user.mustChangePassword,
-      },
-    });
-  });
-
-  router.post('/auth/login', async (req, res) => {
-    const parsed = loginSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
-      return;
-    }
-
-    const username = parsed.data.username.toLowerCase();
-    const ip = getClientIp(req);
-
-    if (isLoginLocked(username, ip)) {
-      res.status(429).json({
-        error: 'تم تجاوز عدد المحاولات المسموح بها. يرجى الانتظار 15 دقيقة والمحاولة مجدداً.',
+      res.json({
+        needsSetup,
+        recoveryConfigured,
+        user: user
+          ? {
+              id: user.id,
+              username: user.username,
+              role: user.role,
+              mustChangePassword: user.mustChangePassword,
+            }
+          : null,
       });
-      return;
-    }
+    })
+  );
 
-    const db = getDb();
-    const user = db.users.find((u) => u.username === username && u.role === 'OWNER');
-
-    if (!user) {
-      await runDummyHashCheck(parsed.data.password);
-      recordFailedLogin(username, ip);
-      res.status(401).json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
-      return;
-    }
-
-    const valid = await verifyPassword(parsed.data.password, user.passwordHash);
-    if (!valid) {
-      recordFailedLogin(username, ip);
-      res.status(401).json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
-      return;
-    }
-
-    clearFailedLogins(username, ip);
-    const { token } = createSessionForUser(user.id);
-    setSessionCookie(req, res, token);
-
-    res.json({
-      token,
-      user: {
-        id: user.id,
-        username: user.username,
-        role: user.role,
-        mustChangePassword: user.mustChangePassword,
-      },
-    });
-  });
-
-  router.post('/auth/logout', (req, res) => {
-    const authHeader = req.headers.authorization;
-    let token: string | null = null;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      token = authHeader.slice('Bearer '.length).trim();
-    } else if (req.headers.cookie) {
-      for (const part of req.headers.cookie.split(';')) {
-        const idx = part.indexOf('=');
-        if (idx === -1) continue;
-        const k = part.slice(0, idx).trim();
-        const v = part.slice(idx + 1).trim();
-        if (k === '__Host-session' || k === 'ed_session') {
-          token = decodeURIComponent(v);
-          break;
-        }
+  router.post(
+    '/auth/setup',
+    asyncHandler(async (req, res) => {
+      if ((await countOwners()) > 0) {
+        res.status(409).json({ error: 'تم إعداد حساب المالك بالفعل.' });
+        return;
       }
-    }
-    if (token) {
-      deleteSessionByToken(token);
-    }
-    clearSessionCookie(req, res);
-    res.json({ ok: true });
-  });
 
-  router.post('/auth/change-password', requireOwner, async (req: AuthenticatedRequest, res) => {
-    const parsed = changePasswordSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.issues[0]?.message || 'بيانات غير صالحة' });
-      return;
-    }
+      const parsed = setupOwnerSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: parsed.error.issues[0]?.message || 'بيانات غير صالحة' });
+        return;
+      }
 
-    const user = req.ownerUser!;
-    const currentValid = await verifyPassword(parsed.data.currentPassword, user.passwordHash);
-    if (!currentValid) {
-      res.status(400).json({ error: 'كلمة المرور الحالية غير صحيحة' });
-      return;
-    }
+      const pwError = validatePasswordStrength(parsed.data.password, parsed.data.username);
+      if (pwError) {
+        res.status(400).json({ error: pwError });
+        return;
+      }
 
-    const strengthError = validatePasswordStrength(parsed.data.newPassword, user.username);
-    if (strengthError) {
-      res.status(400).json({ error: strengthError });
-      return;
-    }
+      const passwordHash = await hashPassword(parsed.data.password);
 
-    const db = getDb();
-    const target = db.users.find((u) => u.id === user.id);
-    if (!target) {
-      res.status(404).json({ error: 'المستخدم غير موجود' });
-      return;
-    }
+      let user;
+      try {
+        user = await createUser({
+          username: parsed.data.username,
+          passwordHash,
+          role: 'OWNER',
+          mustChangePassword: false,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '';
+        if (message.toLowerCase().includes('duplicate')) {
+          res.status(409).json({ error: 'اسم المستخدم مستخدم بالفعل.' });
+          return;
+        }
+        throw err;
+      }
 
-    target.passwordHash = await hashPassword(parsed.data.newPassword);
-    target.mustChangePassword = false;
-    saveDb(db);
-    deleteOtherSessions(user.id, req.sessionToken);
+      const { token } = await createSessionForUser(user.id);
+      setSessionCookie(req, res, token);
+      res.status(201).json({
+        token,
+        user: {
+          id: user.id,
+          username: user.username,
+          role: user.role,
+          mustChangePassword: user.mustChangePassword,
+        },
+      });
+    })
+  );
 
-    res.json({ ok: true });
-  });
+  router.post(
+    '/auth/login',
+    asyncHandler(async (req, res) => {
+      const parsed = loginSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
+        return;
+      }
 
-  router.post('/auth/update-account', requireOwner, async (req: AuthenticatedRequest, res) => {
-    const parsed = updateAccountSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.issues[0]?.message || 'بيانات غير صالحة' });
-      return;
-    }
+      const username = parsed.data.username.toLowerCase();
+      const ip = getClientIp(req);
 
-    const user = req.ownerUser!;
-    const currentValid = await verifyPassword(parsed.data.currentPassword, user.passwordHash);
-    if (!currentValid) {
-      res.status(400).json({ error: 'كلمة المرور الحالية غير صحيحة' });
-      return;
-    }
+      if (await isLoginLocked(username, ip)) {
+        res.status(429).json({
+          error: 'تم تجاوز عدد المحاولات المسموح بها. يرجى الانتظار 15 دقيقة والمحاولة مجدداً.',
+        });
+        return;
+      }
 
-    const nextUsername = parsed.data.username || user.username;
-    const nextPassword = parsed.data.newPassword?.trim() ? parsed.data.newPassword : null;
+      const user = await findOwnerByUsername(username);
 
-    if (nextPassword) {
-      const strengthError = validatePasswordStrength(nextPassword, nextUsername);
+      if (!user) {
+        await runDummyHashCheck(parsed.data.password);
+        await recordFailedLogin(username, ip);
+        res.status(401).json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
+        return;
+      }
+
+      const valid = await verifyPassword(parsed.data.password, user.passwordHash);
+      if (!valid) {
+        await recordFailedLogin(username, ip);
+        res.status(401).json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
+        return;
+      }
+
+      await clearFailedLogins(username, ip);
+      const { token } = await createSessionForUser(user.id);
+      setSessionCookie(req, res, token);
+
+      res.json({
+        token,
+        user: {
+          id: user.id,
+          username: user.username,
+          role: user.role,
+          mustChangePassword: user.mustChangePassword,
+        },
+      });
+    })
+  );
+
+  router.post(
+    '/auth/logout',
+    asyncHandler(async (req, res) => {
+      const { token } = extractTokenFromRequest(req);
+      if (token) {
+        await deleteSessionByToken(token);
+      }
+      clearSessionCookie(req, res);
+      res.json({ ok: true });
+    })
+  );
+
+  router.post(
+    '/auth/change-password',
+    requireOwner,
+    asyncHandler<AuthenticatedRequest>(async (req, res) => {
+      const parsed = changePasswordSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: parsed.error.issues[0]?.message || 'بيانات غير صالحة' });
+        return;
+      }
+
+      const user = req.ownerUser!;
+      const currentValid = await verifyPassword(parsed.data.currentPassword, user.passwordHash);
+      if (!currentValid) {
+        res.status(400).json({ error: 'كلمة المرور الحالية غير صحيحة' });
+        return;
+      }
+
+      const strengthError = validatePasswordStrength(parsed.data.newPassword, user.username);
       if (strengthError) {
         res.status(400).json({ error: strengthError });
         return;
       }
-    }
 
-    const db = getDb();
-    const target = db.users.find((u) => u.id === user.id);
-    if (!target) {
-      res.status(404).json({ error: 'المستخدم غير موجود' });
-      return;
-    }
-
-    target.username = nextUsername;
-    if (nextPassword) {
-      target.passwordHash = await hashPassword(nextPassword);
-      target.mustChangePassword = false;
-    }
-    saveDb(db);
-    deleteOtherSessions(user.id, req.sessionToken);
-
-    res.json({
-      ok: true,
-      user: {
-        id: target.id,
-        username: target.username,
-        role: target.role,
-        mustChangePassword: target.mustChangePassword,
-      },
-    });
-  });
-
-  router.post('/auth/reset-account', async (req, res) => {
-    const expectedCode = process.env.OWNER_RECOVERY_CODE?.trim();
-    if (!expectedCode) {
-      res.status(503).json({
-        error:
-          'ميزة الاسترداد غير مفعّلة بعد. أضف المتغير OWNER_RECOVERY_CODE في إعدادات البيئة على الخادم أولاً.',
-      });
-      return;
-    }
-
-    const ip = getClientIp(req);
-    if (isLoginLocked('__owner_recovery__', ip)) {
-      res.status(429).json({
-        error: 'تم تجاوز عدد المحاولات المسموح بها. يرجى الانتظار 15 دقيقة والمحاولة مجدداً.',
-      });
-      return;
-    }
-
-    const parsed = resetAccountSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.issues[0]?.message || 'بيانات غير صالحة' });
-      return;
-    }
-
-    const submittedDigest = crypto.createHash('sha256').update(parsed.data.recoveryCode).digest();
-    const expectedDigest = crypto.createHash('sha256').update(expectedCode).digest();
-    if (!crypto.timingSafeEqual(submittedDigest, expectedDigest)) {
-      recordFailedLogin('__owner_recovery__', ip);
-      res.status(401).json({ error: 'رمز الاسترداد غير صحيح' });
-      return;
-    }
-
-    const strengthError = validatePasswordStrength(parsed.data.newPassword, parsed.data.username);
-    if (strengthError) {
-      res.status(400).json({ error: strengthError });
-      return;
-    }
-
-    clearFailedLogins('__owner_recovery__', ip);
-
-    const db = getDb();
-    let owner = db.users.find((u) => u.role === 'OWNER');
-    const passwordHash = await hashPassword(parsed.data.newPassword);
-
-    if (!owner) {
-      owner = {
-        id: crypto.randomUUID(),
-        username: parsed.data.username,
-        passwordHash,
-        role: 'OWNER',
+      await updateUser(user.id, {
+        passwordHash: await hashPassword(parsed.data.newPassword),
         mustChangePassword: false,
-        createdAt: new Date().toISOString(),
-      };
-      db.users.push(owner);
-    } else {
-      owner.username = parsed.data.username;
-      owner.passwordHash = passwordHash;
-      owner.mustChangePassword = false;
-    }
+      });
+      await deleteOtherSessions(user.id, req.sessionToken);
 
-    db.sessions = [];
-    saveDb(db);
+      res.json({ ok: true });
+    })
+  );
 
-    const { token } = createSessionForUser(owner.id);
-    setSessionCookie(req, res, token);
+  router.post(
+    '/auth/update-account',
+    requireOwner,
+    asyncHandler<AuthenticatedRequest>(async (req, res) => {
+      const parsed = updateAccountSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: parsed.error.issues[0]?.message || 'بيانات غير صالحة' });
+        return;
+      }
 
-    res.json({
-      token,
-      user: {
-        id: owner.id,
-        username: owner.username,
-        role: owner.role,
-        mustChangePassword: owner.mustChangePassword,
-      },
-    });
-  });
+      const user = req.ownerUser!;
+      const currentValid = await verifyPassword(parsed.data.currentPassword, user.passwordHash);
+      if (!currentValid) {
+        res.status(400).json({ error: 'كلمة المرور الحالية غير صحيحة' });
+        return;
+      }
+
+      const nextUsername = parsed.data.username || user.username;
+      const nextPassword = parsed.data.newPassword?.trim() ? parsed.data.newPassword : null;
+
+      if (nextPassword) {
+        const strengthError = validatePasswordStrength(nextPassword, nextUsername);
+        if (strengthError) {
+          res.status(400).json({ error: strengthError });
+          return;
+        }
+      }
+
+      let updated;
+      try {
+        updated = await updateUser(user.id, {
+          username: nextUsername,
+          passwordHash: nextPassword ? await hashPassword(nextPassword) : undefined,
+          mustChangePassword: nextPassword ? false : undefined,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '';
+        if (message.toLowerCase().includes('duplicate')) {
+          res.status(409).json({ error: 'اسم المستخدم مستخدم بالفعل.' });
+          return;
+        }
+        throw err;
+      }
+
+      await deleteOtherSessions(user.id, req.sessionToken);
+
+      res.json({
+        ok: true,
+        user: {
+          id: updated.id,
+          username: updated.username,
+          role: updated.role,
+          mustChangePassword: updated.mustChangePassword,
+        },
+      });
+    })
+  );
+
+  router.post(
+    '/auth/reset-account',
+    asyncHandler(async (req, res) => {
+      const expectedCode = process.env.OWNER_RECOVERY_CODE?.trim();
+      if (!expectedCode) {
+        res.status(503).json({
+          error:
+            'ميزة الاسترداد غير مفعّلة بعد. أضف المتغير OWNER_RECOVERY_CODE في إعدادات البيئة على الخادم أولاً.',
+        });
+        return;
+      }
+
+      const ip = getClientIp(req);
+      if (await isLoginLocked('__owner_recovery__', ip)) {
+        res.status(429).json({
+          error: 'تم تجاوز عدد المحاولات المسموح بها. يرجى الانتظار 15 دقيقة والمحاولة مجدداً.',
+        });
+        return;
+      }
+
+      const parsed = resetAccountSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: parsed.error.issues[0]?.message || 'بيانات غير صالحة' });
+        return;
+      }
+
+      const submittedDigest = crypto.createHash('sha256').update(parsed.data.recoveryCode).digest();
+      const expectedDigest = crypto.createHash('sha256').update(expectedCode).digest();
+      if (!crypto.timingSafeEqual(submittedDigest, expectedDigest)) {
+        await recordFailedLogin('__owner_recovery__', ip);
+        res.status(401).json({ error: 'رمز الاسترداد غير صحيح' });
+        return;
+      }
+
+      const strengthError = validatePasswordStrength(parsed.data.newPassword, parsed.data.username);
+      if (strengthError) {
+        res.status(400).json({ error: strengthError });
+        return;
+      }
+
+      await clearFailedLogins('__owner_recovery__', ip);
+
+      const passwordHash = await hashPassword(parsed.data.newPassword);
+      const existingOwner = await findFirstOwner();
+
+      const owner = existingOwner
+        ? await updateUser(existingOwner.id, {
+            username: parsed.data.username,
+            passwordHash,
+            mustChangePassword: false,
+          })
+        : await createUser({
+            username: parsed.data.username,
+            passwordHash,
+            role: 'OWNER',
+            mustChangePassword: false,
+          });
+
+      await deleteAllSessions();
+      const { token } = await createSessionForUser(owner.id);
+      setSessionCookie(req, res, token);
+
+      res.json({
+        token,
+        user: {
+          id: owner.id,
+          username: owner.username,
+          role: owner.role,
+          mustChangePassword: owner.mustChangePassword,
+        },
+      });
+    })
+  );
 
   // ---- UPLOADS (OWNER ONLY) ----
-  router.post('/uploads/sign', requireOwner, (req: AuthenticatedRequest, res) => {
-    const ip = getClientIp(req);
-    if (!checkSignRateLimit(`${req.ownerUser!.id}:${ip}`)) {
-      res.status(429).json({ error: 'طلبات رفع كثيرة جداً. انتظر دقيقة وحاول مجدداً.' });
-      return;
-    }
-    const folder = typeof req.body?.folder === 'string' ? req.body.folder.replace(/[^a-z0-9/_-]/gi, '') : 'everyday';
-    const storage = getImageStorage();
-    res.json(storage.signUpload(folder || 'everyday'));
-  });
+  router.post(
+    '/uploads/sign',
+    requireOwner,
+    asyncHandler<AuthenticatedRequest>(async (req, res) => {
+      const ip = getClientIp(req);
+      if (!checkSignRateLimit(`${req.ownerUser!.id}:${ip}`)) {
+        res.status(429).json({ error: 'طلبات رفع كثيرة جداً. انتظر دقيقة وحاول مجدداً.' });
+        return;
+      }
+      const folder =
+        typeof req.body?.folder === 'string'
+          ? req.body.folder.replace(/[^a-z0-9/_-]/gi, '')
+          : 'everyday';
+      const fileName = typeof req.body?.fileName === 'string' ? req.body.fileName : undefined;
+      const mimeType = typeof req.body?.mimeType === 'string' ? req.body.mimeType : undefined;
+      const storage = getImageStorage();
+      res.json(await storage.signUpload(folder || 'everyday', { fileName, mimeType }));
+    })
+  );
 
   router.post(
     '/uploads/local',
@@ -505,45 +501,52 @@ export function createApiRouter(): Router {
     }
   );
 
-  router.post('/uploads/verify', requireOwner, async (req: AuthenticatedRequest, res) => {
-    const schema = z.object({
-      publicId: z.string().min(1),
-      widthHint: z.number().int().positive().max(2560).optional(),
-      heightHint: z.number().int().positive().max(2560).optional(),
-    });
-    const parsed = schema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: 'بيانات الصورة غير صالحة' });
-      return;
-    }
+  router.post(
+    '/uploads/verify',
+    requireOwner,
+    asyncHandler<AuthenticatedRequest>(async (req, res) => {
+      const schema = z.object({
+        publicId: z.string().min(1),
+        widthHint: z.number().int().positive().max(2560).optional(),
+        heightHint: z.number().int().positive().max(2560).optional(),
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: 'بيانات الصورة غير صالحة' });
+        return;
+      }
 
-    try {
-      const storage = getImageStorage();
-      const verified = await storage.verify(parsed.data.publicId);
-      const image: ImageRecord = {
-        id: crypto.randomUUID(),
-        provider: verified.provider,
-        publicId: verified.publicId,
-        url: storage.url(
-          { provider: verified.provider, publicId: verified.publicId, url: verified.url },
-          { width: 1600 }
-        ),
-        width: verified.provider === 'STATIC' && parsed.data.widthHint ? parsed.data.widthHint : verified.width,
-        height: verified.provider === 'STATIC' && parsed.data.heightHint ? parsed.data.heightHint : verified.height,
-        bytes: verified.bytes,
-        format: verified.format,
-        createdAt: new Date().toISOString(),
-      };
+      try {
+        const storage = getImageStorage();
+        const verified = await storage.verify(parsed.data.publicId);
+        const useClientDimensions = verified.provider !== 'CLOUDINARY';
+        const image: ImageRecord = {
+          id: crypto.randomUUID(),
+          provider: verified.provider,
+          publicId: verified.publicId,
+          url: storage.url(
+            { provider: verified.provider, publicId: verified.publicId, url: verified.url },
+            { width: 1600 }
+          ),
+          width:
+            useClientDimensions && parsed.data.widthHint ? parsed.data.widthHint : verified.width,
+          height:
+            useClientDimensions && parsed.data.heightHint ? parsed.data.heightHint : verified.height,
+          bytes: verified.bytes,
+          format: verified.format,
+          createdAt: new Date().toISOString(),
+        };
 
-      const db = getDb();
-      db.images.push(image);
-      saveDb(db);
-      res.status(201).json({ image });
-    } catch (err) {
-      console.error('Image verify failed:', err);
-      res.status(400).json({ error: 'تعذر التحقق من الصورة المرفوعة' });
-    }
-  });
+        const db = getDb();
+        db.images.push(image);
+        await saveDb(db);
+        res.status(201).json({ image });
+      } catch (err) {
+        console.error('Image verify failed:', err);
+        res.status(400).json({ error: 'تعذر التحقق من الصورة المرفوعة' });
+      }
+    })
+  );
 
   // ---- ADMIN DATA ----
   router.get('/admin/data', requireOwner, (_req, res) => {
@@ -638,7 +641,7 @@ export function createApiRouter(): Router {
         sortOrder: idx,
       }));
 
-    saveDb(db);
+    await saveDb(db);
     const removedIds = oldHeroIds.filter((id) => !input.heroImageIds.includes(id));
     if (removedIds.length > 0) {
       await cleanupOrphanImages(removedIds);
@@ -718,7 +721,7 @@ export function createApiRouter(): Router {
       footerTagline: resolved.get('footerTagline')!,
     };
 
-    saveDb(db);
+    await saveDb(db);
     const nextAssets = new Set([input.logoImageId, input.faviconImageId, input.ogImageId]);
     const removed = oldAssetIds.filter((id) => !nextAssets.has(id));
     if (removed.length > 0) {
@@ -757,7 +760,7 @@ export function createApiRouter(): Router {
       isActive: parsed.data.isActive,
     };
     db.destinations.push(dest);
-    saveDb(db);
+    await saveDb(db);
     res.status(201).json({ destination: dest, failedFields: failedPaths, translatedChars });
   });
 
@@ -786,11 +789,11 @@ export function createApiRouter(): Router {
 
     dest.name = resolved.get('name')!;
     dest.isActive = parsed.data.isActive;
-    saveDb(db);
+    await saveDb(db);
     res.json({ destination: dest, failedFields: failedPaths, translatedChars });
   });
 
-  router.patch('/admin/destinations/reorder', requireOwner, (req, res) => {
+  router.patch('/admin/destinations/reorder', requireOwner, async (req, res) => {
     const schema = z.object({ orderedIds: z.array(z.string()) });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
@@ -802,23 +805,23 @@ export function createApiRouter(): Router {
     db.destinations.forEach((d) => {
       if (orderMap.has(d.id)) d.sortOrder = orderMap.get(d.id)!;
     });
-    saveDb(db);
+    await saveDb(db);
     res.json({ ok: true });
   });
 
-  router.delete('/admin/destinations/:id', requireOwner, (req, res) => {
+  router.delete('/admin/destinations/:id', requireOwner, async (req, res) => {
     const db = getDb();
     if (db.trips.some((t) => t.destinationId === req.params.id)) {
       res.status(400).json({ error: 'لا يمكن حذف وجهة مرتبطة برحلات حالية. قم بتعطيلها أو نقل الرحلات أولاً.' });
       return;
     }
     db.destinations = db.destinations.filter((d) => d.id !== req.params.id);
-    saveDb(db);
+    await saveDb(db);
     res.json({ ok: true });
   });
 
   // ---- ADMIN GALLERY ----
-  router.post('/admin/gallery', requireOwner, (req, res) => {
+  router.post('/admin/gallery', requireOwner, async (req, res) => {
     const schema = z.object({ imageIds: z.array(z.string().min(1)).min(1) });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
@@ -841,7 +844,7 @@ export function createApiRouter(): Router {
       db.galleryImages.push(item);
       created.push(item);
     }
-    saveDb(db);
+    await saveDb(db);
     res.status(201).json({ items: created });
   });
 
@@ -870,11 +873,11 @@ export function createApiRouter(): Router {
       },
     ]);
     item.caption = resolved.get('caption')!;
-    saveDb(db);
+    await saveDb(db);
     res.json({ item, failedFields: failedPaths, translatedChars });
   });
 
-  router.patch('/admin/gallery/reorder', requireOwner, (req, res) => {
+  router.patch('/admin/gallery/reorder', requireOwner, async (req, res) => {
     const schema = z.object({ orderedIds: z.array(z.string()) });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
@@ -886,7 +889,7 @@ export function createApiRouter(): Router {
     db.galleryImages.forEach((g) => {
       if (orderMap.has(g.id)) g.sortOrder = orderMap.get(g.id)!;
     });
-    saveDb(db);
+    await saveDb(db);
     res.json({ ok: true });
   });
 
@@ -898,7 +901,7 @@ export function createApiRouter(): Router {
       return;
     }
     db.galleryImages = db.galleryImages.filter((g) => g.id !== item.id);
-    saveDb(db);
+    await saveDb(db);
     await cleanupOrphanImages([item.imageId]);
     res.json({ ok: true });
   });
@@ -1005,7 +1008,7 @@ export function createApiRouter(): Router {
       });
     });
 
-    saveDb(db);
+    await saveDb(db);
     const created = hydrateTrips(db, true).find((t) => t.id === tripId);
     res.status(201).json({ trip: created, failedFields: failedPaths, translatedChars });
   });
@@ -1122,7 +1125,7 @@ export function createApiRouter(): Router {
       });
     });
 
-    saveDb(db);
+    await saveDb(db);
     const removed = oldImageIds.filter((id) => !input.imageIds.includes(id));
     if (removed.length > 0) {
       await cleanupOrphanImages(removed);
@@ -1132,7 +1135,7 @@ export function createApiRouter(): Router {
     res.json({ trip: updated, failedFields: failedPaths, translatedChars });
   });
 
-  router.patch('/admin/trips/reorder', requireOwner, (req, res) => {
+  router.patch('/admin/trips/reorder', requireOwner, async (req, res) => {
     const schema = z.object({ orderedIds: z.array(z.string()) });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
@@ -1144,11 +1147,11 @@ export function createApiRouter(): Router {
     db.trips.forEach((t) => {
       if (orderMap.has(t.id)) t.sortOrder = orderMap.get(t.id)!;
     });
-    saveDb(db);
+    await saveDb(db);
     res.json({ ok: true });
   });
 
-  router.patch('/admin/trips/:id/status', requireOwner, (req, res) => {
+  router.patch('/admin/trips/:id/status', requireOwner, async (req, res) => {
     const schema = z.object({ status: z.enum(['DRAFT', 'PUBLISHED', 'HIDDEN']) });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
@@ -1183,7 +1186,7 @@ export function createApiRouter(): Router {
 
     trip.status = parsed.data.status;
     trip.updatedAt = new Date().toISOString();
-    saveDb(db);
+    await saveDb(db);
     res.json({ ok: true, status: trip.status });
   });
 
@@ -1202,7 +1205,7 @@ export function createApiRouter(): Router {
     db.tripImages = db.tripImages.filter((ti) => ti.tripId !== trip.id);
     db.itineraryDays = db.itineraryDays.filter((d) => d.tripId !== trip.id);
     db.optionalActivities = db.optionalActivities.filter((a) => a.tripId !== trip.id);
-    saveDb(db);
+    await saveDb(db);
 
     if (imageIds.length > 0) {
       await cleanupOrphanImages(imageIds);

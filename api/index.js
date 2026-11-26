@@ -1,18 +1,52 @@
-// @ts-nocheck
-
 // server/app.ts
 import "dotenv/config";
+import "express-async-errors";
 import express2 from "express";
 
+// server/supabase.ts
+import { createClient } from "@supabase/supabase-js";
+var client = null;
+var DEFAULT_STORAGE_BUCKET = "site-images";
+function getSupabaseUrl() {
+  const url = process.env.SUPABASE_URL?.trim();
+  if (!url) return null;
+  return url.replace(/\/+$/, "").replace(/\/rest\/v1$/i, "");
+}
+function getSupabaseServiceRoleKey() {
+  return process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || null;
+}
+function getSupabaseAdmin() {
+  const url = getSupabaseUrl();
+  const serviceRoleKey = getSupabaseServiceRoleKey();
+  if (!url || !serviceRoleKey) {
+    throw new Error(
+      "Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the server environment."
+    );
+  }
+  if (!client) {
+    client = createClient(url, serviceRoleKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false
+      },
+      global: {
+        headers: { "x-application-name": "everyday-travel" }
+      }
+    });
+  }
+  return client;
+}
+function getStorageBucket() {
+  return process.env.SUPABASE_STORAGE_BUCKET?.trim() || DEFAULT_STORAGE_BUCKET;
+}
+
 // server/db.ts
-import fs from "node:fs";
-import path from "node:path";
-import crypto from "node:crypto";
-var IS_SERVERLESS_READONLY = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
-var BUNDLED_DB_PATH = path.resolve(process.cwd(), "data", "db.json");
-var DATA_DIR = IS_SERVERLESS_READONLY ? path.join("/tmp", "everyday-data") : path.resolve(process.cwd(), "data");
-var DB_PATH = path.join(DATA_DIR, "db.json");
+var CACHE_TTL_MS = 1e3;
 var memoryCache = null;
+var memoryCacheLoadedAt = 0;
+var loadInFlight = null;
+var saveQueue = Promise.resolve();
 function createSeedDatabase() {
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const images = [
@@ -528,9 +562,6 @@ function createSeedDatabase() {
     }
   ];
   return {
-    users: [],
-    sessions: [],
-    loginAttempts: [],
     images,
     siteSettings,
     heroImages,
@@ -542,38 +573,305 @@ function createSeedDatabase() {
     galleryImages
   };
 }
-function getDb() {
-  if (memoryCache) {
+function asString(value, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+function asNumber(value, fallback = 0) {
+  const num = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+function asBoolean(value, fallback = false) {
+  return typeof value === "boolean" ? value : fallback;
+}
+function asRows(value) {
+  return Array.isArray(value) ? value : [];
+}
+function asJson(value, fallback) {
+  return value === null || value === void 0 ? fallback : value;
+}
+function toSnakeImage(image) {
+  return {
+    id: image.id,
+    provider: image.provider,
+    public_id: image.publicId,
+    url: image.url,
+    width: image.width,
+    height: image.height,
+    bytes: image.bytes,
+    format: image.format,
+    created_at: image.createdAt
+  };
+}
+function fromSnakeImage(row) {
+  return {
+    id: asString(row.id),
+    provider: asString(row.provider, "STATIC"),
+    publicId: asString(row.public_id),
+    url: asString(row.url),
+    width: asNumber(row.width, 1600),
+    height: asNumber(row.height, 1200),
+    bytes: asNumber(row.bytes, 0),
+    format: asString(row.format, "jpg"),
+    createdAt: asString(row.created_at, (/* @__PURE__ */ new Date()).toISOString())
+  };
+}
+function toSnakeSettings(settings) {
+  return {
+    id: settings.id,
+    company_name: settings.companyName,
+    logo_image_id: settings.logoImageId,
+    favicon_image_id: settings.faviconImageId,
+    phone: settings.phone,
+    whatsapp: settings.whatsapp,
+    email: settings.email,
+    address: settings.address,
+    map_url: settings.mapUrl,
+    tiktok_url: settings.tiktokUrl,
+    facebook_url: settings.facebookUrl,
+    instagram_url: settings.instagramUrl,
+    whatsapp_message: settings.whatsappMessage,
+    seo_title: settings.seoTitle,
+    seo_description: settings.seoDescription,
+    og_image_id: settings.ogImageId,
+    about_title: settings.aboutTitle,
+    about_body: settings.aboutBody,
+    hero_badge: settings.heroBadge,
+    hero_title: settings.heroTitle,
+    hero_subtitle: settings.heroSubtitle,
+    hero_description: settings.heroDescription,
+    hero_features: settings.heroFeatures,
+    hero_interval_seconds: settings.heroIntervalSeconds,
+    show_trips_section: settings.showTripsSection,
+    show_why_us_section: settings.showWhyUsSection,
+    show_gallery_section: settings.showGallerySection,
+    show_contact_section: settings.showContactSection,
+    why_us_items: settings.whyUsItems,
+    trips_intro: settings.tripsIntro,
+    gallery_title: settings.galleryTitle,
+    contact_intro: settings.contactIntro,
+    footer_tagline: settings.footerTagline
+  };
+}
+function fromSnakeSettings(row) {
+  return {
+    id: asString(row.id, "default"),
+    companyName: asJson(row.company_name, { ar: "", en: "", enManual: false }),
+    logoImageId: row.logo_image_id ?? null,
+    faviconImageId: row.favicon_image_id ?? null,
+    phone: asString(row.phone),
+    whatsapp: asString(row.whatsapp),
+    email: asString(row.email),
+    address: asJson(row.address, { ar: "", en: "", enManual: false }),
+    mapUrl: asString(row.map_url),
+    tiktokUrl: asString(row.tiktok_url),
+    facebookUrl: asString(row.facebook_url),
+    instagramUrl: asString(row.instagram_url),
+    whatsappMessage: asJson(row.whatsapp_message, { ar: "", en: "", enManual: false }),
+    seoTitle: asJson(row.seo_title, { ar: "", en: "", enManual: false }),
+    seoDescription: asJson(row.seo_description, { ar: "", en: "", enManual: false }),
+    ogImageId: row.og_image_id ?? null,
+    aboutTitle: asJson(row.about_title, { ar: "", en: "", enManual: false }),
+    aboutBody: asJson(row.about_body, { ar: "", en: "", enManual: false }),
+    heroBadge: asJson(row.hero_badge, { ar: "", en: "", enManual: false }),
+    heroTitle: asJson(row.hero_title, { ar: "", en: "", enManual: false }),
+    heroSubtitle: asJson(row.hero_subtitle, { ar: "", en: "", enManual: false }),
+    heroDescription: asJson(row.hero_description, { ar: "", en: "", enManual: false }),
+    heroFeatures: asJson(row.hero_features, []),
+    heroIntervalSeconds: asNumber(row.hero_interval_seconds, 5),
+    showTripsSection: asBoolean(row.show_trips_section, true),
+    showWhyUsSection: asBoolean(row.show_why_us_section, true),
+    showGallerySection: asBoolean(row.show_gallery_section, true),
+    showContactSection: asBoolean(row.show_contact_section, true),
+    whyUsItems: asJson(row.why_us_items, []),
+    tripsIntro: asJson(row.trips_intro, { ar: "", en: "", enManual: false }),
+    galleryTitle: asJson(row.gallery_title, { ar: "", en: "", enManual: false }),
+    contactIntro: asJson(row.contact_intro, { ar: "", en: "", enManual: false }),
+    footerTagline: asJson(row.footer_tagline, { ar: "", en: "", enManual: false })
+  };
+}
+function toDbState(state) {
+  return {
+    images: state.images.map(toSnakeImage),
+    siteSettings: toSnakeSettings(state.siteSettings),
+    heroImages: state.heroImages.map((row) => ({
+      id: row.id,
+      image_id: row.imageId,
+      sort_order: row.sortOrder
+    })),
+    destinations: state.destinations.map((row) => ({
+      id: row.id,
+      slug: row.slug,
+      name: row.name,
+      sort_order: row.sortOrder,
+      is_active: row.isActive
+    })),
+    trips: state.trips.map((row) => ({
+      id: row.id,
+      slug: row.slug,
+      title: row.title,
+      destination_id: row.destinationId,
+      tagline: row.tagline,
+      badge: row.badge,
+      features: row.features,
+      description: row.description,
+      duration_days: row.durationDays,
+      price_amount: row.priceAmount,
+      price_prefix: row.pricePrefix,
+      price_unit: row.priceUnit,
+      status: row.status,
+      sort_order: row.sortOrder,
+      created_at: row.createdAt,
+      updated_at: row.updatedAt
+    })),
+    tripImages: state.tripImages.map((row) => ({
+      id: row.id,
+      trip_id: row.tripId,
+      image_id: row.imageId,
+      sort_order: row.sortOrder
+    })),
+    itineraryDays: state.itineraryDays.map((row) => ({
+      id: row.id,
+      trip_id: row.tripId,
+      sort_order: row.sortOrder,
+      title: row.title,
+      description: row.description
+    })),
+    optionalActivities: state.optionalActivities.map((row) => ({
+      id: row.id,
+      trip_id: row.tripId,
+      sort_order: row.sortOrder,
+      title: row.title,
+      description: row.description,
+      pricing: row.pricing,
+      price_amount: row.priceAmount
+    })),
+    galleryImages: state.galleryImages.map((row) => ({
+      id: row.id,
+      image_id: row.imageId,
+      caption: row.caption,
+      sort_order: row.sortOrder,
+      created_at: row.createdAt
+    }))
+  };
+}
+function fromDbState(raw) {
+  const state = raw ?? {};
+  const settingsRow = state.siteSettings;
+  return {
+    images: asRows(state.images).map(fromSnakeImage),
+    siteSettings: fromSnakeSettings(settingsRow ?? {}),
+    heroImages: asRows(state.heroImages).map((row) => ({
+      id: asString(row.id),
+      imageId: asString(row.image_id),
+      sortOrder: asNumber(row.sort_order)
+    })),
+    destinations: asRows(state.destinations).map((row) => ({
+      id: asString(row.id),
+      slug: asString(row.slug),
+      name: asJson(row.name, { ar: "", en: "", enManual: false }),
+      sortOrder: asNumber(row.sort_order),
+      isActive: asBoolean(row.is_active, true)
+    })),
+    trips: asRows(state.trips).map((row) => ({
+      id: asString(row.id),
+      slug: asString(row.slug),
+      title: asJson(row.title, { ar: "", en: "", enManual: false }),
+      destinationId: asString(row.destination_id),
+      tagline: asJson(row.tagline, { ar: "", en: "", enManual: false }),
+      badge: row.badge ?? null,
+      features: asJson(row.features, []),
+      description: asJson(row.description, { ar: "", en: "", enManual: false }),
+      durationDays: row.duration_days === null ? null : asNumber(row.duration_days),
+      priceAmount: row.price_amount === null ? null : asNumber(row.price_amount),
+      pricePrefix: asString(row.price_prefix, "NONE"),
+      priceUnit: asString(row.price_unit, "PER_PERSON"),
+      status: asString(row.status, "DRAFT"),
+      sortOrder: asNumber(row.sort_order),
+      createdAt: asString(row.created_at, (/* @__PURE__ */ new Date()).toISOString()),
+      updatedAt: asString(row.updated_at, (/* @__PURE__ */ new Date()).toISOString())
+    })),
+    tripImages: asRows(state.tripImages).map((row) => ({
+      id: asString(row.id),
+      tripId: asString(row.trip_id),
+      imageId: asString(row.image_id),
+      sortOrder: asNumber(row.sort_order)
+    })),
+    itineraryDays: asRows(state.itineraryDays).map((row) => ({
+      id: asString(row.id),
+      tripId: asString(row.trip_id),
+      sortOrder: asNumber(row.sort_order),
+      title: asJson(row.title, { ar: "", en: "", enManual: false }),
+      description: asJson(row.description, { ar: "", en: "", enManual: false })
+    })),
+    optionalActivities: asRows(state.optionalActivities).map((row) => ({
+      id: asString(row.id),
+      tripId: asString(row.trip_id),
+      sortOrder: asNumber(row.sort_order),
+      title: asJson(row.title, { ar: "", en: "", enManual: false }),
+      description: asJson(row.description, { ar: "", en: "", enManual: false }),
+      pricing: asString(row.pricing, "FREE"),
+      priceAmount: row.price_amount === null ? null : asNumber(row.price_amount)
+    })),
+    galleryImages: asRows(state.galleryImages).map((row) => ({
+      id: asString(row.id),
+      imageId: asString(row.image_id),
+      caption: row.caption ?? null,
+      sortOrder: asNumber(row.sort_order),
+      createdAt: asString(row.created_at, (/* @__PURE__ */ new Date()).toISOString())
+    }))
+  };
+}
+async function persistState(state) {
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase.rpc("replace_site_state", {
+    payload: toDbState(state)
+  });
+  if (error) {
+    throw new Error(`Failed to save site state to Supabase: ${error.message}`);
+  }
+}
+async function loadDb(options = {}) {
+  if (!options.force && memoryCache && Date.now() - memoryCacheLoadedAt < CACHE_TTL_MS) {
     return memoryCache;
   }
-  const candidatePaths = IS_SERVERLESS_READONLY ? [DB_PATH, BUNDLED_DB_PATH] : [DB_PATH];
-  for (const candidate of candidatePaths) {
-    if (fs.existsSync(candidate)) {
-      try {
-        const raw = fs.readFileSync(candidate, "utf-8");
-        memoryCache = JSON.parse(raw);
-        return memoryCache;
-      } catch (err) {
-        console.error(`Failed to read db from ${candidate}:`, err);
-      }
+  if (loadInFlight) return loadInFlight;
+  loadInFlight = (async () => {
+    const supabase = getSupabaseAdmin();
+    const { data, error } = await supabase.rpc("get_site_state");
+    if (error) {
+      throw new Error(
+        `Failed to load site state from Supabase: ${error.message}. Make sure supabase/migrations/0001_init.sql has been applied.`
+      );
     }
+    const rawSettings = data?.siteSettings;
+    if (!rawSettings) {
+      const seeded = createSeedDatabase();
+      await persistState(seeded);
+      memoryCache = seeded;
+      memoryCacheLoadedAt = Date.now();
+      return seeded;
+    }
+    const state = fromDbState(data);
+    memoryCache = state;
+    memoryCacheLoadedAt = Date.now();
+    return state;
+  })().finally(() => {
+    loadInFlight = null;
+  });
+  return loadInFlight;
+}
+function getDb() {
+  if (!memoryCache) {
+    throw new Error("Database not loaded. Call loadDb() before getDb().");
   }
-  memoryCache = createSeedDatabase();
-  saveDb(memoryCache);
   return memoryCache;
 }
-function saveDb(next) {
+async function saveDb(next) {
+  const run = saveQueue.then(() => persistState(next));
+  saveQueue = run.catch(() => void 0);
+  await run;
   memoryCache = next;
-  try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    const tmpPath = path.join(DATA_DIR, `db.${crypto.randomUUID()}.tmp.json`);
-    fs.writeFileSync(tmpPath, JSON.stringify(next, null, 2), "utf-8");
-    fs.renameSync(tmpPath, DB_PATH);
-  } catch (err) {
-    console.warn("Unable to persist db.json to disk, keeping in-memory state:", err);
-  }
+  memoryCacheLoadedAt = Date.now();
 }
 function hydrateTrips(db, includeUnpublished = false) {
   const imageMap = new Map(db.images.map((img) => [img.id, img]));
@@ -612,14 +910,14 @@ function buildPublicPayload(db) {
 }
 
 // server/routes.ts
-import crypto4 from "node:crypto";
-import fs3 from "node:fs";
-import path3 from "node:path";
+import crypto3 from "node:crypto";
+import fs2 from "node:fs";
+import path2 from "node:path";
 import express from "express";
 import { z as z2 } from "zod";
 
 // server/auth.ts
-import crypto2 from "node:crypto";
+import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 var BCRYPT_COST = 12;
 var SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1e3;
@@ -629,6 +927,26 @@ var MAX_LOGIN_FAILURES = 5;
 var DUMMY_HASH = "$2b$12$C6UzMDM.H6dfI/f/IKcEe.W0zQ6n4q5R7sT8uV9wX0yZ1aB2cD3e.";
 var SESSION_COOKIE_NAME = "__Host-session";
 var FALLBACK_COOKIE_NAME = "ed_session";
+function toUser(row) {
+  return {
+    id: String(row.id),
+    username: String(row.username),
+    passwordHash: String(row.password_hash),
+    role: row.role ?? "OWNER",
+    mustChangePassword: Boolean(row.must_change_password),
+    createdAt: String(row.created_at)
+  };
+}
+function toSession(row) {
+  return {
+    id: String(row.id),
+    userId: String(row.user_id),
+    tokenHash: String(row.token_hash),
+    expiresAt: String(row.expires_at),
+    lastRefreshedAt: String(row.last_refreshed_at),
+    createdAt: String(row.created_at)
+  };
+}
 function hashPassword(password) {
   return bcrypt.hash(password, BCRYPT_COST);
 }
@@ -639,7 +957,7 @@ async function runDummyHashCheck(password) {
   await bcrypt.compare(password, DUMMY_HASH);
 }
 function hashSessionToken(token) {
-  return crypto2.createHash("sha256").update(token).digest("hex");
+  return crypto.createHash("sha256").update(token).digest("hex");
 }
 function getClientIp(req) {
   const forwarded = req.headers["x-forwarded-for"];
@@ -649,68 +967,130 @@ function getClientIp(req) {
   return req.socket.remoteAddress || "unknown";
 }
 function getAttemptKey(username, ip) {
-  return crypto2.createHash("sha256").update(`${username.toLowerCase().trim()}|${ip}`).digest("hex");
+  return crypto.createHash("sha256").update(`${username.toLowerCase().trim()}|${ip}`).digest("hex");
 }
-function isLoginLocked(username, ip) {
-  const db = getDb();
-  const key = getAttemptKey(username, ip);
-  const cutoff = Date.now() - LOCKOUT_WINDOW_MS;
-  const recentFailures = db.loginAttempts.filter(
-    (a) => a.key === key && new Date(a.createdAt).getTime() >= cutoff
-  );
-  return recentFailures.length >= MAX_LOGIN_FAILURES;
+async function countOwners() {
+  const { count, error } = await getSupabaseAdmin().from("users").select("id", { count: "exact", head: true }).eq("role", "OWNER");
+  if (error) throw new Error(`Failed to count owners: ${error.message}`);
+  return count ?? 0;
 }
-function recordFailedLogin(username, ip) {
-  const db = getDb();
-  const key = getAttemptKey(username, ip);
-  const cutoff = Date.now() - LOCKOUT_WINDOW_MS;
-  db.loginAttempts = db.loginAttempts.filter(
-    (a) => new Date(a.createdAt).getTime() >= cutoff
-  );
-  db.loginAttempts.push({
-    id: crypto2.randomUUID(),
-    key,
-    createdAt: (/* @__PURE__ */ new Date()).toISOString()
-  });
-  saveDb(db);
+async function findOwnerByUsername(username) {
+  const { data, error } = await getSupabaseAdmin().from("users").select("*").eq("username", username.toLowerCase()).eq("role", "OWNER").maybeSingle();
+  if (error) throw new Error(`Failed to load user: ${error.message}`);
+  return data ? toUser(data) : null;
 }
-function clearFailedLogins(username, ip) {
-  const db = getDb();
-  const key = getAttemptKey(username, ip);
-  db.loginAttempts = db.loginAttempts.filter((a) => a.key !== key);
-  saveDb(db);
+async function findFirstOwner() {
+  const { data, error } = await getSupabaseAdmin().from("users").select("*").eq("role", "OWNER").order("created_at", { ascending: true }).limit(1).maybeSingle();
+  if (error) throw new Error(`Failed to load owner: ${error.message}`);
+  return data ? toUser(data) : null;
 }
-function createSessionForUser(userId) {
-  const db = getDb();
-  const token = crypto2.randomBytes(32).toString("base64url");
+async function findUserById(id) {
+  const { data, error } = await getSupabaseAdmin().from("users").select("*").eq("id", id).maybeSingle();
+  if (error) throw new Error(`Failed to load user: ${error.message}`);
+  return data ? toUser(data) : null;
+}
+async function createUser(input) {
+  const row = {
+    id: crypto.randomUUID(),
+    username: input.username.toLowerCase(),
+    password_hash: input.passwordHash,
+    role: input.role ?? "OWNER",
+    must_change_password: input.mustChangePassword ?? false,
+    created_at: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  const { data, error } = await getSupabaseAdmin().from("users").insert(row).select("*").single();
+  if (error || !data) {
+    throw new Error(`Failed to create user: ${error?.message ?? "unknown error"}`);
+  }
+  return toUser(data);
+}
+async function updateUser(id, patch) {
+  const row = {};
+  if (patch.username !== void 0) row.username = patch.username.toLowerCase();
+  if (patch.passwordHash !== void 0) row.password_hash = patch.passwordHash;
+  if (patch.mustChangePassword !== void 0) row.must_change_password = patch.mustChangePassword;
+  const { data, error } = await getSupabaseAdmin().from("users").update(row).eq("id", id).select("*").single();
+  if (error || !data) {
+    throw new Error(`Failed to update user: ${error?.message ?? "unknown error"}`);
+  }
+  return toUser(data);
+}
+async function createSessionForUser(userId) {
+  const supabase = getSupabaseAdmin();
+  const token = crypto.randomBytes(32).toString("base64url");
   const tokenHash = hashSessionToken(token);
   const now = Date.now();
   const expiresAt = new Date(now + SESSION_TTL_MS).toISOString();
-  db.sessions = db.sessions.filter((s) => new Date(s.expiresAt).getTime() > now);
-  db.sessions.push({
-    id: crypto2.randomUUID(),
-    userId,
-    tokenHash,
-    expiresAt,
-    lastRefreshedAt: new Date(now).toISOString(),
-    createdAt: new Date(now).toISOString()
+  await supabase.from("sessions").delete().lt("expires_at", new Date(now).toISOString());
+  const { error } = await supabase.from("sessions").insert({
+    id: crypto.randomUUID(),
+    user_id: userId,
+    token_hash: tokenHash,
+    expires_at: expiresAt,
+    last_refreshed_at: new Date(now).toISOString(),
+    created_at: new Date(now).toISOString()
   });
-  saveDb(db);
+  if (error) throw new Error(`Failed to create session: ${error.message}`);
   return { token, expiresAt };
 }
-function deleteSessionByToken(token) {
-  const db = getDb();
+async function findSessionByToken(token) {
   const tokenHash = hashSessionToken(token);
-  db.sessions = db.sessions.filter((s) => s.tokenHash !== tokenHash);
-  saveDb(db);
+  const { data, error } = await getSupabaseAdmin().from("sessions").select("*").eq("token_hash", tokenHash).maybeSingle();
+  if (error) throw new Error(`Failed to load session: ${error.message}`);
+  return data ? toSession(data) : null;
 }
-function deleteOtherSessions(userId, keepToken) {
-  const db = getDb();
-  const keepHash = keepToken ? hashSessionToken(keepToken) : null;
-  db.sessions = db.sessions.filter(
-    (s) => s.userId !== userId || keepHash !== null && s.tokenHash === keepHash
-  );
-  saveDb(db);
+async function deleteSessionById(id) {
+  const { error } = await getSupabaseAdmin().from("sessions").delete().eq("id", id);
+  if (error) throw new Error(`Failed to delete session: ${error.message}`);
+}
+async function deleteSessionByToken(token) {
+  const tokenHash = hashSessionToken(token);
+  const { error } = await getSupabaseAdmin().from("sessions").delete().eq("token_hash", tokenHash);
+  if (error) throw new Error(`Failed to delete session: ${error.message}`);
+}
+async function deleteOtherSessions(userId, keepToken) {
+  let query = getSupabaseAdmin().from("sessions").delete().eq("user_id", userId);
+  if (keepToken) {
+    query = query.neq("token_hash", hashSessionToken(keepToken));
+  }
+  const { error } = await query;
+  if (error) throw new Error(`Failed to delete sessions: ${error.message}`);
+}
+async function deleteAllSessions() {
+  const { error } = await getSupabaseAdmin().from("sessions").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  if (error) throw new Error(`Failed to delete sessions: ${error.message}`);
+}
+async function refreshSession(session) {
+  const now = Date.now();
+  const { error } = await getSupabaseAdmin().from("sessions").update({
+    expires_at: new Date(now + SESSION_TTL_MS).toISOString(),
+    last_refreshed_at: new Date(now).toISOString()
+  }).eq("id", session.id);
+  if (error) throw new Error(`Failed to refresh session: ${error.message}`);
+}
+async function isLoginLocked(username, ip) {
+  const key = getAttemptKey(username, ip);
+  const cutoff = new Date(Date.now() - LOCKOUT_WINDOW_MS).toISOString();
+  const { count, error } = await getSupabaseAdmin().from("login_attempts").select("id", { count: "exact", head: true }).eq("key", key).gte("created_at", cutoff);
+  if (error) throw new Error(`Failed to check login attempts: ${error.message}`);
+  return (count ?? 0) >= MAX_LOGIN_FAILURES;
+}
+async function recordFailedLogin(username, ip) {
+  const supabase = getSupabaseAdmin();
+  const key = getAttemptKey(username, ip);
+  const cutoff = new Date(Date.now() - LOCKOUT_WINDOW_MS).toISOString();
+  await supabase.from("login_attempts").delete().lt("created_at", cutoff);
+  const { error } = await supabase.from("login_attempts").insert({
+    id: crypto.randomUUID(),
+    key,
+    created_at: (/* @__PURE__ */ new Date()).toISOString()
+  });
+  if (error) throw new Error(`Failed to record login attempt: ${error.message}`);
+}
+async function clearFailedLogins(username, ip) {
+  const key = getAttemptKey(username, ip);
+  const { error } = await getSupabaseAdmin().from("login_attempts").delete().eq("key", key);
+  if (error) throw new Error(`Failed to clear login attempts: ${error.message}`);
 }
 function parseCookies(cookieHeader) {
   const out = {};
@@ -790,55 +1170,149 @@ function verifyMutationOrigin(req) {
     return false;
   }
 }
-function requireOwner(req, res, next) {
-  const { token, source } = extractTokenFromRequest(req);
-  if (!token) {
-    res.status(401).json({ error: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D. \u064A\u0631\u062C\u0649 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644." });
-    return;
+async function resolveOwnerFromRequest(req) {
+  const { token } = extractTokenFromRequest(req);
+  if (!token) return null;
+  const session = await findSessionByToken(token);
+  if (!session) return null;
+  if (new Date(session.expiresAt).getTime() <= Date.now()) {
+    await deleteSessionById(session.id);
+    return null;
   }
-  if (source === "cookie" && ["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
-    if (!verifyMutationOrigin(req)) {
-      res.status(403).json({ error: "Origin mismatch" });
+  const user = await findUserById(session.userId);
+  if (!user || user.role !== "OWNER") return null;
+  return user;
+}
+async function requireOwner(req, res, next) {
+  try {
+    const { token, source } = extractTokenFromRequest(req);
+    if (!token) {
+      res.status(401).json({ error: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D. \u064A\u0631\u062C\u0649 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644." });
       return;
     }
-  }
-  const db = getDb();
-  const tokenHash = hashSessionToken(token);
-  const now = Date.now();
-  const session = db.sessions.find((s) => s.tokenHash === tokenHash);
-  if (!session || new Date(session.expiresAt).getTime() <= now) {
-    if (session) {
-      db.sessions = db.sessions.filter((s) => s.id !== session.id);
-      saveDb(db);
+    if (source === "cookie" && ["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
+      if (!verifyMutationOrigin(req)) {
+        res.status(403).json({ error: "Origin mismatch" });
+        return;
+      }
     }
-    res.status(401).json({ error: "\u0627\u0646\u062A\u0647\u062A \u0627\u0644\u062C\u0644\u0633\u0629. \u064A\u0631\u062C\u0649 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u062C\u062F\u062F\u0627\u064B." });
-    return;
+    const session = await findSessionByToken(token);
+    if (!session) {
+      res.status(401).json({ error: "\u0627\u0646\u062A\u0647\u062A \u0627\u0644\u062C\u0644\u0633\u0629. \u064A\u0631\u062C\u0649 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u062C\u062F\u062F\u0627\u064B." });
+      return;
+    }
+    if (new Date(session.expiresAt).getTime() <= Date.now()) {
+      await deleteSessionById(session.id);
+      res.status(401).json({ error: "\u0627\u0646\u062A\u0647\u062A \u0627\u0644\u062C\u0644\u0633\u0629. \u064A\u0631\u062C\u0649 \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 \u0645\u062C\u062F\u062F\u0627\u064B." });
+      return;
+    }
+    const user = await findUserById(session.userId);
+    if (!user || user.role !== "OWNER") {
+      res.status(401).json({ error: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D." });
+      return;
+    }
+    const lastRefreshed = new Date(session.lastRefreshedAt).getTime();
+    if (Date.now() - lastRefreshed >= SESSION_REFRESH_INTERVAL_MS) {
+      await refreshSession(session);
+    }
+    req.ownerUser = user;
+    req.sessionToken = token;
+    next();
+  } catch (err) {
+    next(err);
   }
-  const user = db.users.find((u) => u.id === session.userId && u.role === "OWNER");
-  if (!user) {
-    res.status(401).json({ error: "\u063A\u064A\u0631 \u0645\u0635\u0631\u062D." });
-    return;
-  }
-  const lastRefreshed = new Date(session.lastRefreshedAt).getTime();
-  if (now - lastRefreshed >= SESSION_REFRESH_INTERVAL_MS) {
-    session.expiresAt = new Date(now + SESSION_TTL_MS).toISOString();
-    session.lastRefreshedAt = new Date(now).toISOString();
-    saveDb(db);
-  }
-  req.ownerUser = user;
-  req.sessionToken = token;
-  next();
 }
 
 // server/storage.ts
-import crypto3 from "node:crypto";
-import fs2 from "node:fs";
-import path2 from "node:path";
-var IS_SERVERLESS_READONLY2 = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
-var LOCAL_UPLOAD_DIR = IS_SERVERLESS_READONLY2 ? path2.join("/tmp", "everyday-uploads") : path2.resolve(process.cwd(), "public", "uploads");
-function getUploadTokenSecret() {
-  return process.env.SESSION_SECRET || globalThis.__everydayUploadSecret || (globalThis.__everydayUploadSecret = crypto3.randomBytes(32).toString("hex"));
+import crypto2 from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+var IS_SERVERLESS_READONLY = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+var LOCAL_UPLOAD_DIR = IS_SERVERLESS_READONLY ? path.join("/tmp", "everyday-uploads") : path.resolve(process.cwd(), "public", "uploads");
+var MIME_TO_EXT = {
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/heic": "heic",
+  "image/heif": "heif"
+};
+function extensionFor(options) {
+  const mime = options?.mimeType?.toLowerCase() || "";
+  if (MIME_TO_EXT[mime]) return MIME_TO_EXT[mime];
+  const ext = options?.fileName?.split(".").pop()?.toLowerCase() || "";
+  return /^[a-z0-9]{2,5}$/.test(ext) ? ext : "jpg";
 }
+function sanitizeFolder(folder) {
+  return folder.replace(/[^a-z0-9/_-]/gi, "").replace(/^\/+|\/+$/g, "").slice(0, 120) || "everyday";
+}
+function getUploadTokenSecret() {
+  return process.env.SESSION_SECRET || globalThis.__everydayUploadSecret || (globalThis.__everydayUploadSecret = crypto2.randomBytes(32).toString("hex"));
+}
+var SupabaseStorage = class {
+  constructor() {
+    this.provider = "SUPABASE";
+  }
+  async signUpload(folder = "everyday", options) {
+    const bucket = getStorageBucket();
+    const objectPath = `${sanitizeFolder(folder)}/${crypto2.randomUUID()}.${extensionFor(options)}`;
+    const { data, error } = await getSupabaseAdmin().storage.from(bucket).createSignedUploadUrl(objectPath);
+    if (error || !data) {
+      throw new Error(`Failed to sign Supabase upload: ${error?.message ?? "unknown error"}`);
+    }
+    const baseUrl = getSupabaseUrl() ?? "";
+    const uploadUrl = /^https?:\/\//i.test(data.signedUrl) ? data.signedUrl : `${baseUrl}${data.signedUrl.startsWith("/") ? "" : "/"}${data.signedUrl}`;
+    return {
+      provider: "SUPABASE",
+      uploadUrl,
+      fields: {
+        path: data.path ?? objectPath,
+        token: data.token,
+        bucket
+      }
+    };
+  }
+  async verify(publicId) {
+    const bucket = getStorageBucket();
+    const supabase = getSupabaseAdmin();
+    const slash = publicId.lastIndexOf("/");
+    const dir = slash >= 0 ? publicId.slice(0, slash) : "";
+    const name = slash >= 0 ? publicId.slice(slash + 1) : publicId;
+    const { data, error } = await supabase.storage.from(bucket).list(dir, {
+      search: name,
+      limit: 100
+    });
+    if (error) {
+      throw new Error(`Failed to verify Supabase upload: ${error.message}`);
+    }
+    const file = (data ?? []).find((item) => item.name === name);
+    if (!file) {
+      throw new Error("Uploaded file not found in Supabase Storage");
+    }
+    const metadata = file.metadata ?? {};
+    const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(publicId);
+    const format = MIME_TO_EXT[metadata.mimetype?.toLowerCase() ?? ""] || name.split(".").pop()?.toLowerCase() || "jpg";
+    return {
+      provider: "SUPABASE",
+      publicId,
+      url: publicData.publicUrl,
+      width: 1600,
+      height: 1200,
+      bytes: metadata.size ?? metadata.contentLength ?? 0,
+      format
+    };
+  }
+  async destroy(publicId) {
+    if (publicId.startsWith("seed/") || publicId.startsWith("local/")) return;
+    const { error } = await getSupabaseAdmin().storage.from(getStorageBucket()).remove([publicId]);
+    if (error) {
+      console.error(`[ImageStorage] Supabase remove failed for ${publicId}: ${error.message}`);
+    }
+  }
+  url(image) {
+    return image.url;
+  }
+};
 var CloudinaryStorage = class {
   constructor() {
     this.provider = "CLOUDINARY";
@@ -850,7 +1324,7 @@ var CloudinaryStorage = class {
     const uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET;
     return { cloudName, apiKey, apiSecret, uploadPreset };
   }
-  signUpload(folder = "everyday") {
+  async signUpload(folder = "everyday") {
     const { cloudName, apiKey, apiSecret, uploadPreset } = this.config;
     const timestamp = Math.floor(Date.now() / 1e3).toString();
     const paramsToSign = {
@@ -859,7 +1333,7 @@ var CloudinaryStorage = class {
       upload_preset: uploadPreset
     };
     const sortedString = Object.keys(paramsToSign).sort().map((k) => `${k}=${paramsToSign[k]}`).join("&");
-    const signature = crypto3.createHash("sha1").update(`${sortedString}${apiSecret}`).digest("hex");
+    const signature = crypto2.createHash("sha1").update(`${sortedString}${apiSecret}`).digest("hex");
     return {
       provider: "CLOUDINARY",
       uploadUrl: `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
@@ -898,7 +1372,7 @@ var CloudinaryStorage = class {
     if (publicId.startsWith("seed/") || publicId.startsWith("local/")) return;
     const { cloudName, apiKey, apiSecret } = this.config;
     const timestamp = Math.floor(Date.now() / 1e3).toString();
-    const signature = crypto3.createHash("sha1").update(`public_id=${publicId}&timestamp=${timestamp}${apiSecret}`).digest("hex");
+    const signature = crypto2.createHash("sha1").update(`public_id=${publicId}&timestamp=${timestamp}${apiSecret}`).digest("hex");
     const body = new URLSearchParams({
       public_id: publicId,
       timestamp,
@@ -929,10 +1403,10 @@ var StaticStorage = class {
   constructor() {
     this.provider = "STATIC";
   }
-  signUpload(folder = "everyday") {
+  async signUpload(folder = "everyday") {
     const exp = String(Date.now() + 5 * 60 * 1e3);
-    const nonce = crypto3.randomBytes(12).toString("hex");
-    const sig = crypto3.createHmac("sha256", getUploadTokenSecret()).update(`${folder}:${exp}:${nonce}`).digest("hex");
+    const nonce = crypto2.randomBytes(12).toString("hex");
+    const sig = crypto2.createHmac("sha256", getUploadTokenSecret()).update(`${folder}:${exp}:${nonce}`).digest("hex");
     return {
       provider: "STATIC",
       uploadUrl: "/api/uploads/local",
@@ -947,22 +1421,22 @@ var StaticStorage = class {
   verifyUploadSignature(fields) {
     const expNum = Number(fields.exp);
     if (!Number.isFinite(expNum) || Date.now() > expNum) return false;
-    const expected = crypto3.createHmac("sha256", getUploadTokenSecret()).update(`${fields.folder}:${fields.exp}:${fields.nonce}`).digest("hex");
+    const expected = crypto2.createHmac("sha256", getUploadTokenSecret()).update(`${fields.folder}:${fields.exp}:${fields.nonce}`).digest("hex");
     const a = Buffer.from(expected, "utf8");
     const b = Buffer.from(fields.signature || "", "utf8");
-    return a.length === b.length && crypto3.timingSafeEqual(a, b);
+    return a.length === b.length && crypto2.timingSafeEqual(a, b);
   }
   async verify(publicId) {
     if (!publicId.startsWith("local/")) {
       throw new Error("Invalid local publicId");
     }
     const fileName = publicId.slice("local/".length);
-    const resolved = path2.resolve(LOCAL_UPLOAD_DIR, fileName);
-    if (!resolved.startsWith(LOCAL_UPLOAD_DIR + path2.sep) || !fs2.existsSync(resolved)) {
+    const resolved = path.resolve(LOCAL_UPLOAD_DIR, fileName);
+    if (!resolved.startsWith(LOCAL_UPLOAD_DIR + path.sep) || !fs.existsSync(resolved)) {
       throw new Error("Uploaded file not found");
     }
-    const stat = fs2.statSync(resolved);
-    const ext = path2.extname(fileName).replace(".", "").toLowerCase() || "jpg";
+    const stat = fs.statSync(resolved);
+    const ext = path.extname(fileName).replace(".", "").toLowerCase() || "jpg";
     return {
       provider: "STATIC",
       publicId,
@@ -976,11 +1450,11 @@ var StaticStorage = class {
   async destroy(publicId) {
     if (!publicId.startsWith("local/")) return;
     const fileName = publicId.slice("local/".length);
-    const resolved = path2.resolve(LOCAL_UPLOAD_DIR, fileName);
-    if (!resolved.startsWith(LOCAL_UPLOAD_DIR + path2.sep)) return;
+    const resolved = path.resolve(LOCAL_UPLOAD_DIR, fileName);
+    if (!resolved.startsWith(LOCAL_UPLOAD_DIR + path.sep)) return;
     try {
-      if (fs2.existsSync(resolved)) {
-        fs2.unlinkSync(resolved);
+      if (fs.existsSync(resolved)) {
+        fs.unlinkSync(resolved);
       }
     } catch (err) {
       console.error(`[ImageStorage] Static destroy error for ${publicId}:`, err);
@@ -992,15 +1466,21 @@ var StaticStorage = class {
 };
 var staticStorage = new StaticStorage();
 function getImageStorage() {
+  const preference = process.env.IMAGE_STORAGE?.trim().toLowerCase();
+  const hasSupabase = Boolean(
+    process.env.SUPABASE_URL?.trim() && process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+  );
   const hasCloudinary = Boolean(process.env.CLOUDINARY_CLOUD_NAME) && Boolean(process.env.CLOUDINARY_API_KEY) && Boolean(process.env.CLOUDINARY_API_SECRET) && Boolean(process.env.CLOUDINARY_UPLOAD_PRESET);
-  if (hasCloudinary) {
-    return new CloudinaryStorage();
-  }
+  if (preference === "cloudinary" && hasCloudinary) return new CloudinaryStorage();
+  if (preference === "static") return staticStorage;
+  if (preference === "supabase") return new SupabaseStorage();
+  if (hasSupabase) return new SupabaseStorage();
+  if (hasCloudinary) return new CloudinaryStorage();
   return staticStorage;
 }
 function ensureLocalUploadDir() {
-  if (!fs2.existsSync(LOCAL_UPLOAD_DIR)) {
-    fs2.mkdirSync(LOCAL_UPLOAD_DIR, { recursive: true });
+  if (!fs.existsSync(LOCAL_UPLOAD_DIR)) {
+    fs.mkdirSync(LOCAL_UPLOAD_DIR, { recursive: true });
   }
   return LOCAL_UPLOAD_DIR;
 }
@@ -1034,21 +1514,21 @@ function prepareTranslationTasks(entries) {
     tasks,
     apply: (translatedMap, failedPaths) => {
       const out = /* @__PURE__ */ new Map();
-      for (const [path4, base] of prepared.entries()) {
-        if (translatedMap.has(path4)) {
-          out.set(path4, {
+      for (const [path3, base] of prepared.entries()) {
+        if (translatedMap.has(path3)) {
+          out.set(path3, {
             ar: base.ar,
-            en: translatedMap.get(path4).trim(),
+            en: translatedMap.get(path3).trim(),
             enManual: false
           });
-        } else if (failedPaths.has(path4)) {
-          out.set(path4, {
+        } else if (failedPaths.has(path3)) {
+          out.set(path3, {
             ar: base.ar,
             en: "",
             enManual: false
           });
         } else {
-          out.set(path4, base);
+          out.set(path3, base);
         }
       }
       return out;
@@ -1456,6 +1936,11 @@ var ALLOWED_IMAGE_MIME_TO_EXT = {
   "image/heif": "heif"
 };
 var signRateWindow = /* @__PURE__ */ new Map();
+function asyncHandler(fn) {
+  return (req, res, next) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+}
 function checkSignRateLimit(key) {
   const now = Date.now();
   const entry = signRateWindow.get(key);
@@ -1492,7 +1977,7 @@ async function cleanupOrphanImages(imageIds) {
     }
   }
   db.images = remaining;
-  saveDb(db);
+  await saveDb(db);
 }
 function createApiRouter() {
   const router = express.Router();
@@ -1500,299 +1985,281 @@ function createApiRouter() {
     const db = getDb();
     res.json(buildPublicPayload(db));
   });
-  router.get("/auth/me", (req, res) => {
-    const db = getDb();
-    const needsSetup = db.users.filter((u) => u.role === "OWNER").length === 0;
-    let currentUser = null;
-    const authHeader = req.headers.authorization;
-    const cookieHeader = req.headers.cookie;
-    let rawToken = null;
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      rawToken = authHeader.slice("Bearer ".length).trim();
-    } else if (cookieHeader) {
-      for (const part of cookieHeader.split(";")) {
-        const idx = part.indexOf("=");
-        if (idx === -1) continue;
-        const k = part.slice(0, idx).trim();
-        const v = part.slice(idx + 1).trim();
-        if (k === "__Host-session" || k === "ed_session") {
-          rawToken = decodeURIComponent(v);
-          break;
-        }
-      }
-    }
-    if (rawToken) {
-      const tokenHash = crypto4.createHash("sha256").update(rawToken).digest("hex");
-      const now = Date.now();
-      const session = db.sessions.find(
-        (s) => s.tokenHash === tokenHash && new Date(s.expiresAt).getTime() > now
-      );
-      if (session) {
-        const user = db.users.find((u) => u.id === session.userId && u.role === "OWNER");
-        if (user) {
-          currentUser = {
-            id: user.id,
-            username: user.username,
-            role: user.role,
-            mustChangePassword: user.mustChangePassword
-          };
-        }
-      }
-    }
-    const recoveryConfigured = Boolean(process.env.OWNER_RECOVERY_CODE?.trim());
-    res.json({ needsSetup, recoveryConfigured, user: currentUser });
-  });
-  router.post("/auth/setup", async (req, res) => {
-    const db = getDb();
-    if (db.users.some((u) => u.role === "OWNER")) {
-      res.status(409).json({ error: "\u062A\u0645 \u0625\u0639\u062F\u0627\u062F \u062D\u0633\u0627\u0628 \u0627\u0644\u0645\u0627\u0644\u0643 \u0628\u0627\u0644\u0641\u0639\u0644." });
-      return;
-    }
-    const parsed = setupOwnerSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.issues[0]?.message || "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629" });
-      return;
-    }
-    const pwError = validatePasswordStrength(parsed.data.password, parsed.data.username);
-    if (pwError) {
-      res.status(400).json({ error: pwError });
-      return;
-    }
-    const passwordHash = await hashPassword(parsed.data.password);
-    const user = {
-      id: crypto4.randomUUID(),
-      username: parsed.data.username,
-      passwordHash,
-      role: "OWNER",
-      mustChangePassword: false,
-      createdAt: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    db.users.push(user);
-    saveDb(db);
-    const { token } = createSessionForUser(user.id);
-    setSessionCookie(req, res, token);
-    res.status(201).json({
-      token,
-      user: {
-        id: user.id,
-        username: user.username,
-        role: user.role,
-        mustChangePassword: user.mustChangePassword
-      }
-    });
-  });
-  router.post("/auth/login", async (req, res) => {
-    const parsed = loginSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0623\u0648 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" });
-      return;
-    }
-    const username = parsed.data.username.toLowerCase();
-    const ip = getClientIp(req);
-    if (isLoginLocked(username, ip)) {
-      res.status(429).json({
-        error: "\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u0639\u062F\u062F \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u0645\u0633\u0645\u0648\u062D \u0628\u0647\u0627. \u064A\u0631\u062C\u0649 \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631 15 \u062F\u0642\u064A\u0642\u0629 \u0648\u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0645\u062C\u062F\u062F\u0627\u064B."
+  router.get(
+    "/auth/me",
+    asyncHandler(async (req, res) => {
+      const needsSetup = await countOwners() === 0;
+      const user = await resolveOwnerFromRequest(req);
+      const recoveryConfigured = Boolean(process.env.OWNER_RECOVERY_CODE?.trim());
+      res.json({
+        needsSetup,
+        recoveryConfigured,
+        user: user ? {
+          id: user.id,
+          username: user.username,
+          role: user.role,
+          mustChangePassword: user.mustChangePassword
+        } : null
       });
-      return;
-    }
-    const db = getDb();
-    const user = db.users.find((u) => u.username === username && u.role === "OWNER");
-    if (!user) {
-      await runDummyHashCheck(parsed.data.password);
-      recordFailedLogin(username, ip);
-      res.status(401).json({ error: "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0623\u0648 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" });
-      return;
-    }
-    const valid = await verifyPassword(parsed.data.password, user.passwordHash);
-    if (!valid) {
-      recordFailedLogin(username, ip);
-      res.status(401).json({ error: "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0623\u0648 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" });
-      return;
-    }
-    clearFailedLogins(username, ip);
-    const { token } = createSessionForUser(user.id);
-    setSessionCookie(req, res, token);
-    res.json({
-      token,
-      user: {
-        id: user.id,
-        username: user.username,
-        role: user.role,
-        mustChangePassword: user.mustChangePassword
+    })
+  );
+  router.post(
+    "/auth/setup",
+    asyncHandler(async (req, res) => {
+      if (await countOwners() > 0) {
+        res.status(409).json({ error: "\u062A\u0645 \u0625\u0639\u062F\u0627\u062F \u062D\u0633\u0627\u0628 \u0627\u0644\u0645\u0627\u0644\u0643 \u0628\u0627\u0644\u0641\u0639\u0644." });
+        return;
       }
-    });
-  });
-  router.post("/auth/logout", (req, res) => {
-    const authHeader = req.headers.authorization;
-    let token = null;
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      token = authHeader.slice("Bearer ".length).trim();
-    } else if (req.headers.cookie) {
-      for (const part of req.headers.cookie.split(";")) {
-        const idx = part.indexOf("=");
-        if (idx === -1) continue;
-        const k = part.slice(0, idx).trim();
-        const v = part.slice(idx + 1).trim();
-        if (k === "__Host-session" || k === "ed_session") {
-          token = decodeURIComponent(v);
-          break;
+      const parsed = setupOwnerSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: parsed.error.issues[0]?.message || "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629" });
+        return;
+      }
+      const pwError = validatePasswordStrength(parsed.data.password, parsed.data.username);
+      if (pwError) {
+        res.status(400).json({ error: pwError });
+        return;
+      }
+      const passwordHash = await hashPassword(parsed.data.password);
+      let user;
+      try {
+        user = await createUser({
+          username: parsed.data.username,
+          passwordHash,
+          role: "OWNER",
+          mustChangePassword: false
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "";
+        if (message.toLowerCase().includes("duplicate")) {
+          res.status(409).json({ error: "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0645\u0633\u062A\u062E\u062F\u0645 \u0628\u0627\u0644\u0641\u0639\u0644." });
+          return;
         }
+        throw err;
       }
-    }
-    if (token) {
-      deleteSessionByToken(token);
-    }
-    clearSessionCookie(req, res);
-    res.json({ ok: true });
-  });
-  router.post("/auth/change-password", requireOwner, async (req, res) => {
-    const parsed = changePasswordSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.issues[0]?.message || "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629" });
-      return;
-    }
-    const user = req.ownerUser;
-    const currentValid = await verifyPassword(parsed.data.currentPassword, user.passwordHash);
-    if (!currentValid) {
-      res.status(400).json({ error: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" });
-      return;
-    }
-    const strengthError = validatePasswordStrength(parsed.data.newPassword, user.username);
-    if (strengthError) {
-      res.status(400).json({ error: strengthError });
-      return;
-    }
-    const db = getDb();
-    const target = db.users.find((u) => u.id === user.id);
-    if (!target) {
-      res.status(404).json({ error: "\u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
-      return;
-    }
-    target.passwordHash = await hashPassword(parsed.data.newPassword);
-    target.mustChangePassword = false;
-    saveDb(db);
-    deleteOtherSessions(user.id, req.sessionToken);
-    res.json({ ok: true });
-  });
-  router.post("/auth/update-account", requireOwner, async (req, res) => {
-    const parsed = updateAccountSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.issues[0]?.message || "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629" });
-      return;
-    }
-    const user = req.ownerUser;
-    const currentValid = await verifyPassword(parsed.data.currentPassword, user.passwordHash);
-    if (!currentValid) {
-      res.status(400).json({ error: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" });
-      return;
-    }
-    const nextUsername = parsed.data.username || user.username;
-    const nextPassword = parsed.data.newPassword?.trim() ? parsed.data.newPassword : null;
-    if (nextPassword) {
-      const strengthError = validatePasswordStrength(nextPassword, nextUsername);
+      const { token } = await createSessionForUser(user.id);
+      setSessionCookie(req, res, token);
+      res.status(201).json({
+        token,
+        user: {
+          id: user.id,
+          username: user.username,
+          role: user.role,
+          mustChangePassword: user.mustChangePassword
+        }
+      });
+    })
+  );
+  router.post(
+    "/auth/login",
+    asyncHandler(async (req, res) => {
+      const parsed = loginSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0623\u0648 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" });
+        return;
+      }
+      const username = parsed.data.username.toLowerCase();
+      const ip = getClientIp(req);
+      if (await isLoginLocked(username, ip)) {
+        res.status(429).json({
+          error: "\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u0639\u062F\u062F \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u0645\u0633\u0645\u0648\u062D \u0628\u0647\u0627. \u064A\u0631\u062C\u0649 \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631 15 \u062F\u0642\u064A\u0642\u0629 \u0648\u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0645\u062C\u062F\u062F\u0627\u064B."
+        });
+        return;
+      }
+      const user = await findOwnerByUsername(username);
+      if (!user) {
+        await runDummyHashCheck(parsed.data.password);
+        await recordFailedLogin(username, ip);
+        res.status(401).json({ error: "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0623\u0648 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" });
+        return;
+      }
+      const valid = await verifyPassword(parsed.data.password, user.passwordHash);
+      if (!valid) {
+        await recordFailedLogin(username, ip);
+        res.status(401).json({ error: "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0623\u0648 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" });
+        return;
+      }
+      await clearFailedLogins(username, ip);
+      const { token } = await createSessionForUser(user.id);
+      setSessionCookie(req, res, token);
+      res.json({
+        token,
+        user: {
+          id: user.id,
+          username: user.username,
+          role: user.role,
+          mustChangePassword: user.mustChangePassword
+        }
+      });
+    })
+  );
+  router.post(
+    "/auth/logout",
+    asyncHandler(async (req, res) => {
+      const { token } = extractTokenFromRequest(req);
+      if (token) {
+        await deleteSessionByToken(token);
+      }
+      clearSessionCookie(req, res);
+      res.json({ ok: true });
+    })
+  );
+  router.post(
+    "/auth/change-password",
+    requireOwner,
+    asyncHandler(async (req, res) => {
+      const parsed = changePasswordSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: parsed.error.issues[0]?.message || "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629" });
+        return;
+      }
+      const user = req.ownerUser;
+      const currentValid = await verifyPassword(parsed.data.currentPassword, user.passwordHash);
+      if (!currentValid) {
+        res.status(400).json({ error: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" });
+        return;
+      }
+      const strengthError = validatePasswordStrength(parsed.data.newPassword, user.username);
       if (strengthError) {
         res.status(400).json({ error: strengthError });
         return;
       }
-    }
-    const db = getDb();
-    const target = db.users.find((u) => u.id === user.id);
-    if (!target) {
-      res.status(404).json({ error: "\u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F" });
-      return;
-    }
-    target.username = nextUsername;
-    if (nextPassword) {
-      target.passwordHash = await hashPassword(nextPassword);
-      target.mustChangePassword = false;
-    }
-    saveDb(db);
-    deleteOtherSessions(user.id, req.sessionToken);
-    res.json({
-      ok: true,
-      user: {
-        id: target.id,
-        username: target.username,
-        role: target.role,
-        mustChangePassword: target.mustChangePassword
+      await updateUser(user.id, {
+        passwordHash: await hashPassword(parsed.data.newPassword),
+        mustChangePassword: false
+      });
+      await deleteOtherSessions(user.id, req.sessionToken);
+      res.json({ ok: true });
+    })
+  );
+  router.post(
+    "/auth/update-account",
+    requireOwner,
+    asyncHandler(async (req, res) => {
+      const parsed = updateAccountSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: parsed.error.issues[0]?.message || "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629" });
+        return;
       }
-    });
-  });
-  router.post("/auth/reset-account", async (req, res) => {
-    const expectedCode = process.env.OWNER_RECOVERY_CODE?.trim();
-    if (!expectedCode) {
-      res.status(503).json({
-        error: "\u0645\u064A\u0632\u0629 \u0627\u0644\u0627\u0633\u062A\u0631\u062F\u0627\u062F \u063A\u064A\u0631 \u0645\u0641\u0639\u0651\u0644\u0629 \u0628\u0639\u062F. \u0623\u0636\u0641 \u0627\u0644\u0645\u062A\u063A\u064A\u0631 OWNER_RECOVERY_CODE \u0641\u064A \u0625\u0639\u062F\u0627\u062F\u0627\u062A \u0627\u0644\u0628\u064A\u0626\u0629 \u0639\u0644\u0649 \u0627\u0644\u062E\u0627\u062F\u0645 \u0623\u0648\u0644\u0627\u064B."
+      const user = req.ownerUser;
+      const currentValid = await verifyPassword(parsed.data.currentPassword, user.passwordHash);
+      if (!currentValid) {
+        res.status(400).json({ error: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629 \u063A\u064A\u0631 \u0635\u062D\u064A\u062D\u0629" });
+        return;
+      }
+      const nextUsername = parsed.data.username || user.username;
+      const nextPassword = parsed.data.newPassword?.trim() ? parsed.data.newPassword : null;
+      if (nextPassword) {
+        const strengthError = validatePasswordStrength(nextPassword, nextUsername);
+        if (strengthError) {
+          res.status(400).json({ error: strengthError });
+          return;
+        }
+      }
+      let updated;
+      try {
+        updated = await updateUser(user.id, {
+          username: nextUsername,
+          passwordHash: nextPassword ? await hashPassword(nextPassword) : void 0,
+          mustChangePassword: nextPassword ? false : void 0
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "";
+        if (message.toLowerCase().includes("duplicate")) {
+          res.status(409).json({ error: "\u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u062E\u062F\u0645 \u0645\u0633\u062A\u062E\u062F\u0645 \u0628\u0627\u0644\u0641\u0639\u0644." });
+          return;
+        }
+        throw err;
+      }
+      await deleteOtherSessions(user.id, req.sessionToken);
+      res.json({
+        ok: true,
+        user: {
+          id: updated.id,
+          username: updated.username,
+          role: updated.role,
+          mustChangePassword: updated.mustChangePassword
+        }
       });
-      return;
-    }
-    const ip = getClientIp(req);
-    if (isLoginLocked("__owner_recovery__", ip)) {
-      res.status(429).json({
-        error: "\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u0639\u062F\u062F \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u0645\u0633\u0645\u0648\u062D \u0628\u0647\u0627. \u064A\u0631\u062C\u0649 \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631 15 \u062F\u0642\u064A\u0642\u0629 \u0648\u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0645\u062C\u062F\u062F\u0627\u064B."
-      });
-      return;
-    }
-    const parsed = resetAccountSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.issues[0]?.message || "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629" });
-      return;
-    }
-    const submittedDigest = crypto4.createHash("sha256").update(parsed.data.recoveryCode).digest();
-    const expectedDigest = crypto4.createHash("sha256").update(expectedCode).digest();
-    if (!crypto4.timingSafeEqual(submittedDigest, expectedDigest)) {
-      recordFailedLogin("__owner_recovery__", ip);
-      res.status(401).json({ error: "\u0631\u0645\u0632 \u0627\u0644\u0627\u0633\u062A\u0631\u062F\u0627\u062F \u063A\u064A\u0631 \u0635\u062D\u064A\u062D" });
-      return;
-    }
-    const strengthError = validatePasswordStrength(parsed.data.newPassword, parsed.data.username);
-    if (strengthError) {
-      res.status(400).json({ error: strengthError });
-      return;
-    }
-    clearFailedLogins("__owner_recovery__", ip);
-    const db = getDb();
-    let owner = db.users.find((u) => u.role === "OWNER");
-    const passwordHash = await hashPassword(parsed.data.newPassword);
-    if (!owner) {
-      owner = {
-        id: crypto4.randomUUID(),
+    })
+  );
+  router.post(
+    "/auth/reset-account",
+    asyncHandler(async (req, res) => {
+      const expectedCode = process.env.OWNER_RECOVERY_CODE?.trim();
+      if (!expectedCode) {
+        res.status(503).json({
+          error: "\u0645\u064A\u0632\u0629 \u0627\u0644\u0627\u0633\u062A\u0631\u062F\u0627\u062F \u063A\u064A\u0631 \u0645\u0641\u0639\u0651\u0644\u0629 \u0628\u0639\u062F. \u0623\u0636\u0641 \u0627\u0644\u0645\u062A\u063A\u064A\u0631 OWNER_RECOVERY_CODE \u0641\u064A \u0625\u0639\u062F\u0627\u062F\u0627\u062A \u0627\u0644\u0628\u064A\u0626\u0629 \u0639\u0644\u0649 \u0627\u0644\u062E\u0627\u062F\u0645 \u0623\u0648\u0644\u0627\u064B."
+        });
+        return;
+      }
+      const ip = getClientIp(req);
+      if (await isLoginLocked("__owner_recovery__", ip)) {
+        res.status(429).json({
+          error: "\u062A\u0645 \u062A\u062C\u0627\u0648\u0632 \u0639\u062F\u062F \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u0645\u0633\u0645\u0648\u062D \u0628\u0647\u0627. \u064A\u0631\u062C\u0649 \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631 15 \u062F\u0642\u064A\u0642\u0629 \u0648\u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0645\u062C\u062F\u062F\u0627\u064B."
+        });
+        return;
+      }
+      const parsed = resetAccountSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: parsed.error.issues[0]?.message || "\u0628\u064A\u0627\u0646\u0627\u062A \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629" });
+        return;
+      }
+      const submittedDigest = crypto3.createHash("sha256").update(parsed.data.recoveryCode).digest();
+      const expectedDigest = crypto3.createHash("sha256").update(expectedCode).digest();
+      if (!crypto3.timingSafeEqual(submittedDigest, expectedDigest)) {
+        await recordFailedLogin("__owner_recovery__", ip);
+        res.status(401).json({ error: "\u0631\u0645\u0632 \u0627\u0644\u0627\u0633\u062A\u0631\u062F\u0627\u062F \u063A\u064A\u0631 \u0635\u062D\u064A\u062D" });
+        return;
+      }
+      const strengthError = validatePasswordStrength(parsed.data.newPassword, parsed.data.username);
+      if (strengthError) {
+        res.status(400).json({ error: strengthError });
+        return;
+      }
+      await clearFailedLogins("__owner_recovery__", ip);
+      const passwordHash = await hashPassword(parsed.data.newPassword);
+      const existingOwner = await findFirstOwner();
+      const owner = existingOwner ? await updateUser(existingOwner.id, {
+        username: parsed.data.username,
+        passwordHash,
+        mustChangePassword: false
+      }) : await createUser({
         username: parsed.data.username,
         passwordHash,
         role: "OWNER",
-        mustChangePassword: false,
-        createdAt: (/* @__PURE__ */ new Date()).toISOString()
-      };
-      db.users.push(owner);
-    } else {
-      owner.username = parsed.data.username;
-      owner.passwordHash = passwordHash;
-      owner.mustChangePassword = false;
-    }
-    db.sessions = [];
-    saveDb(db);
-    const { token } = createSessionForUser(owner.id);
-    setSessionCookie(req, res, token);
-    res.json({
-      token,
-      user: {
-        id: owner.id,
-        username: owner.username,
-        role: owner.role,
-        mustChangePassword: owner.mustChangePassword
+        mustChangePassword: false
+      });
+      await deleteAllSessions();
+      const { token } = await createSessionForUser(owner.id);
+      setSessionCookie(req, res, token);
+      res.json({
+        token,
+        user: {
+          id: owner.id,
+          username: owner.username,
+          role: owner.role,
+          mustChangePassword: owner.mustChangePassword
+        }
+      });
+    })
+  );
+  router.post(
+    "/uploads/sign",
+    requireOwner,
+    asyncHandler(async (req, res) => {
+      const ip = getClientIp(req);
+      if (!checkSignRateLimit(`${req.ownerUser.id}:${ip}`)) {
+        res.status(429).json({ error: "\u0637\u0644\u0628\u0627\u062A \u0631\u0641\u0639 \u0643\u062B\u064A\u0631\u0629 \u062C\u062F\u0627\u064B. \u0627\u0646\u062A\u0638\u0631 \u062F\u0642\u064A\u0642\u0629 \u0648\u062D\u0627\u0648\u0644 \u0645\u062C\u062F\u062F\u0627\u064B." });
+        return;
       }
-    });
-  });
-  router.post("/uploads/sign", requireOwner, (req, res) => {
-    const ip = getClientIp(req);
-    if (!checkSignRateLimit(`${req.ownerUser.id}:${ip}`)) {
-      res.status(429).json({ error: "\u0637\u0644\u0628\u0627\u062A \u0631\u0641\u0639 \u0643\u062B\u064A\u0631\u0629 \u062C\u062F\u0627\u064B. \u0627\u0646\u062A\u0638\u0631 \u062F\u0642\u064A\u0642\u0629 \u0648\u062D\u0627\u0648\u0644 \u0645\u062C\u062F\u062F\u0627\u064B." });
-      return;
-    }
-    const folder = typeof req.body?.folder === "string" ? req.body.folder.replace(/[^a-z0-9/_-]/gi, "") : "everyday";
-    const storage = getImageStorage();
-    res.json(storage.signUpload(folder || "everyday"));
-  });
+      const folder = typeof req.body?.folder === "string" ? req.body.folder.replace(/[^a-z0-9/_-]/gi, "") : "everyday";
+      const fileName = typeof req.body?.fileName === "string" ? req.body.fileName : void 0;
+      const mimeType = typeof req.body?.mimeType === "string" ? req.body.mimeType : void 0;
+      const storage = getImageStorage();
+      res.json(await storage.signUpload(folder || "everyday", { fileName, mimeType }));
+    })
+  );
   router.post(
     "/uploads/local",
     requireOwner,
@@ -1818,13 +2285,13 @@ function createApiRouter() {
         return;
       }
       const uploadDir = ensureLocalUploadDir();
-      const fileName = `${crypto4.randomUUID()}.${ext}`;
-      const targetPath = path3.resolve(uploadDir, fileName);
-      if (!targetPath.startsWith(uploadDir + path3.sep)) {
+      const fileName = `${crypto3.randomUUID()}.${ext}`;
+      const targetPath = path2.resolve(uploadDir, fileName);
+      if (!targetPath.startsWith(uploadDir + path2.sep)) {
         res.status(400).json({ error: "\u0645\u0633\u0627\u0631 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D" });
         return;
       }
-      fs3.writeFileSync(targetPath, body);
+      fs2.writeFileSync(targetPath, body);
       const width = Math.min(2560, Math.max(100, Number(req.headers["x-upload-width"]) || 1600));
       const height = Math.min(2560, Math.max(100, Number(req.headers["x-upload-height"]) || 1200));
       res.json({
@@ -1837,43 +2304,48 @@ function createApiRouter() {
       });
     }
   );
-  router.post("/uploads/verify", requireOwner, async (req, res) => {
-    const schema = z2.object({
-      publicId: z2.string().min(1),
-      widthHint: z2.number().int().positive().max(2560).optional(),
-      heightHint: z2.number().int().positive().max(2560).optional()
-    });
-    const parsed = schema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0635\u0648\u0631\u0629 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629" });
-      return;
-    }
-    try {
-      const storage = getImageStorage();
-      const verified = await storage.verify(parsed.data.publicId);
-      const image = {
-        id: crypto4.randomUUID(),
-        provider: verified.provider,
-        publicId: verified.publicId,
-        url: storage.url(
-          { provider: verified.provider, publicId: verified.publicId, url: verified.url },
-          { width: 1600 }
-        ),
-        width: verified.provider === "STATIC" && parsed.data.widthHint ? parsed.data.widthHint : verified.width,
-        height: verified.provider === "STATIC" && parsed.data.heightHint ? parsed.data.heightHint : verified.height,
-        bytes: verified.bytes,
-        format: verified.format,
-        createdAt: (/* @__PURE__ */ new Date()).toISOString()
-      };
-      const db = getDb();
-      db.images.push(image);
-      saveDb(db);
-      res.status(201).json({ image });
-    } catch (err) {
-      console.error("Image verify failed:", err);
-      res.status(400).json({ error: "\u062A\u0639\u0630\u0631 \u0627\u0644\u062A\u062D\u0642\u0642 \u0645\u0646 \u0627\u0644\u0635\u0648\u0631\u0629 \u0627\u0644\u0645\u0631\u0641\u0648\u0639\u0629" });
-    }
-  });
+  router.post(
+    "/uploads/verify",
+    requireOwner,
+    asyncHandler(async (req, res) => {
+      const schema = z2.object({
+        publicId: z2.string().min(1),
+        widthHint: z2.number().int().positive().max(2560).optional(),
+        heightHint: z2.number().int().positive().max(2560).optional()
+      });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: "\u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0635\u0648\u0631\u0629 \u063A\u064A\u0631 \u0635\u0627\u0644\u062D\u0629" });
+        return;
+      }
+      try {
+        const storage = getImageStorage();
+        const verified = await storage.verify(parsed.data.publicId);
+        const useClientDimensions = verified.provider !== "CLOUDINARY";
+        const image = {
+          id: crypto3.randomUUID(),
+          provider: verified.provider,
+          publicId: verified.publicId,
+          url: storage.url(
+            { provider: verified.provider, publicId: verified.publicId, url: verified.url },
+            { width: 1600 }
+          ),
+          width: useClientDimensions && parsed.data.widthHint ? parsed.data.widthHint : verified.width,
+          height: useClientDimensions && parsed.data.heightHint ? parsed.data.heightHint : verified.height,
+          bytes: verified.bytes,
+          format: verified.format,
+          createdAt: (/* @__PURE__ */ new Date()).toISOString()
+        };
+        const db = getDb();
+        db.images.push(image);
+        await saveDb(db);
+        res.status(201).json({ image });
+      } catch (err) {
+        console.error("Image verify failed:", err);
+        res.status(400).json({ error: "\u062A\u0639\u0630\u0631 \u0627\u0644\u062A\u062D\u0642\u0642 \u0645\u0646 \u0627\u0644\u0635\u0648\u0631\u0629 \u0627\u0644\u0645\u0631\u0641\u0648\u0639\u0629" });
+      }
+    })
+  );
   router.get("/admin/data", requireOwner, (_req, res) => {
     const db = getDb();
     const imageMap = new Map(db.images.map((i) => [i.id, i]));
@@ -1944,11 +2416,11 @@ function createApiRouter() {
     };
     const validImageSet = new Set(db.images.map((i) => i.id));
     db.heroImages = input.heroImageIds.filter((id) => validImageSet.has(id)).map((imageId, idx) => ({
-      id: crypto4.randomUUID(),
+      id: crypto3.randomUUID(),
       imageId,
       sortOrder: idx
     }));
-    saveDb(db);
+    await saveDb(db);
     const removedIds = oldHeroIds.filter((id) => !input.heroImageIds.includes(id));
     if (removedIds.length > 0) {
       await cleanupOrphanImages(removedIds);
@@ -2013,7 +2485,7 @@ function createApiRouter() {
       contactIntro: resolved.get("contactIntro"),
       footerTagline: resolved.get("footerTagline")
     };
-    saveDb(db);
+    await saveDb(db);
     const nextAssets = /* @__PURE__ */ new Set([input.logoImageId, input.faviconImageId, input.ogImageId]);
     const removed = oldAssetIds.filter((id) => !nextAssets.has(id));
     if (removed.length > 0) {
@@ -2039,14 +2511,14 @@ function createApiRouter() {
       slug = `${baseSlug}-${suffix++}`;
     }
     const dest = {
-      id: crypto4.randomUUID(),
+      id: crypto3.randomUUID(),
       slug,
       name,
       sortOrder: db.destinations.length,
       isActive: parsed.data.isActive
     };
     db.destinations.push(dest);
-    saveDb(db);
+    await saveDb(db);
     res.status(201).json({ destination: dest, failedFields: failedPaths, translatedChars });
   });
   router.put("/admin/destinations/:id", requireOwner, async (req, res) => {
@@ -2071,10 +2543,10 @@ function createApiRouter() {
     ]);
     dest.name = resolved.get("name");
     dest.isActive = parsed.data.isActive;
-    saveDb(db);
+    await saveDb(db);
     res.json({ destination: dest, failedFields: failedPaths, translatedChars });
   });
-  router.patch("/admin/destinations/reorder", requireOwner, (req, res) => {
+  router.patch("/admin/destinations/reorder", requireOwner, async (req, res) => {
     const schema = z2.object({ orderedIds: z2.array(z2.string()) });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
@@ -2086,20 +2558,20 @@ function createApiRouter() {
     db.destinations.forEach((d) => {
       if (orderMap.has(d.id)) d.sortOrder = orderMap.get(d.id);
     });
-    saveDb(db);
+    await saveDb(db);
     res.json({ ok: true });
   });
-  router.delete("/admin/destinations/:id", requireOwner, (req, res) => {
+  router.delete("/admin/destinations/:id", requireOwner, async (req, res) => {
     const db = getDb();
     if (db.trips.some((t) => t.destinationId === req.params.id)) {
       res.status(400).json({ error: "\u0644\u0627 \u064A\u0645\u0643\u0646 \u062D\u0630\u0641 \u0648\u062C\u0647\u0629 \u0645\u0631\u062A\u0628\u0637\u0629 \u0628\u0631\u062D\u0644\u0627\u062A \u062D\u0627\u0644\u064A\u0629. \u0642\u0645 \u0628\u062A\u0639\u0637\u064A\u0644\u0647\u0627 \u0623\u0648 \u0646\u0642\u0644 \u0627\u0644\u0631\u062D\u0644\u0627\u062A \u0623\u0648\u0644\u0627\u064B." });
       return;
     }
     db.destinations = db.destinations.filter((d) => d.id !== req.params.id);
-    saveDb(db);
+    await saveDb(db);
     res.json({ ok: true });
   });
-  router.post("/admin/gallery", requireOwner, (req, res) => {
+  router.post("/admin/gallery", requireOwner, async (req, res) => {
     const schema = z2.object({ imageIds: z2.array(z2.string().min(1)).min(1) });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
@@ -2113,7 +2585,7 @@ function createApiRouter() {
     for (const imageId of parsed.data.imageIds) {
       if (!validImages.has(imageId)) continue;
       const item = {
-        id: crypto4.randomUUID(),
+        id: crypto3.randomUUID(),
         imageId,
         caption: { ar: "", en: "", enManual: false },
         sortOrder: nextOrder++,
@@ -2122,7 +2594,7 @@ function createApiRouter() {
       db.galleryImages.push(item);
       created.push(item);
     }
-    saveDb(db);
+    await saveDb(db);
     res.status(201).json({ items: created });
   });
   router.put("/admin/gallery/:id", requireOwner, async (req, res) => {
@@ -2150,10 +2622,10 @@ function createApiRouter() {
       }
     ]);
     item.caption = resolved.get("caption");
-    saveDb(db);
+    await saveDb(db);
     res.json({ item, failedFields: failedPaths, translatedChars });
   });
-  router.patch("/admin/gallery/reorder", requireOwner, (req, res) => {
+  router.patch("/admin/gallery/reorder", requireOwner, async (req, res) => {
     const schema = z2.object({ orderedIds: z2.array(z2.string()) });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
@@ -2165,7 +2637,7 @@ function createApiRouter() {
     db.galleryImages.forEach((g) => {
       if (orderMap.has(g.id)) g.sortOrder = orderMap.get(g.id);
     });
-    saveDb(db);
+    await saveDb(db);
     res.json({ ok: true });
   });
   router.delete("/admin/gallery/:id", requireOwner, async (req, res) => {
@@ -2176,7 +2648,7 @@ function createApiRouter() {
       return;
     }
     db.galleryImages = db.galleryImages.filter((g) => g.id !== item.id);
-    saveDb(db);
+    await saveDb(db);
     await cleanupOrphanImages([item.imageId]);
     res.json({ ok: true });
   });
@@ -2221,7 +2693,7 @@ function createApiRouter() {
     while (db.trips.some((t) => t.slug === slug)) {
       slug = `${baseSlug}-${suffix++}`;
     }
-    const tripId = crypto4.randomUUID();
+    const tripId = crypto3.randomUUID();
     const now = (/* @__PURE__ */ new Date()).toISOString();
     db.trips.push({
       id: tripId,
@@ -2244,7 +2716,7 @@ function createApiRouter() {
     const validImageIds = new Set(db.images.map((i) => i.id));
     input.imageIds.filter((id) => validImageIds.has(id)).forEach((imageId, idx) => {
       db.tripImages.push({
-        id: crypto4.randomUUID(),
+        id: crypto3.randomUUID(),
         tripId,
         imageId,
         sortOrder: idx
@@ -2252,7 +2724,7 @@ function createApiRouter() {
     });
     input.itinerary.forEach((_, idx) => {
       db.itineraryDays.push({
-        id: crypto4.randomUUID(),
+        id: crypto3.randomUUID(),
         tripId,
         sortOrder: idx,
         title: resolved.get(`itinerary.${idx}.title`),
@@ -2261,7 +2733,7 @@ function createApiRouter() {
     });
     input.optionalActivities.forEach((act, idx) => {
       db.optionalActivities.push({
-        id: crypto4.randomUUID(),
+        id: crypto3.randomUUID(),
         tripId,
         sortOrder: idx,
         title: resolved.get(`activities.${idx}.title`),
@@ -2270,7 +2742,7 @@ function createApiRouter() {
         priceAmount: act.pricing === "EXTRA_COST" ? act.priceAmount ?? null : null
       });
     });
-    saveDb(db);
+    await saveDb(db);
     const created = hydrateTrips(db, true).find((t) => t.id === tripId);
     res.status(201).json({ trip: created, failedFields: failedPaths, translatedChars });
   });
@@ -2339,7 +2811,7 @@ function createApiRouter() {
     db.tripImages = db.tripImages.filter((ti) => ti.tripId !== existing.id);
     input.imageIds.filter((id) => validImageIds.has(id)).forEach((imageId, idx) => {
       db.tripImages.push({
-        id: crypto4.randomUUID(),
+        id: crypto3.randomUUID(),
         tripId: existing.id,
         imageId,
         sortOrder: idx
@@ -2348,7 +2820,7 @@ function createApiRouter() {
     db.itineraryDays = db.itineraryDays.filter((d) => d.tripId !== existing.id);
     input.itinerary.forEach((_, idx) => {
       db.itineraryDays.push({
-        id: crypto4.randomUUID(),
+        id: crypto3.randomUUID(),
         tripId: existing.id,
         sortOrder: idx,
         title: resolved.get(`itinerary.${idx}.title`),
@@ -2358,7 +2830,7 @@ function createApiRouter() {
     db.optionalActivities = db.optionalActivities.filter((a) => a.tripId !== existing.id);
     input.optionalActivities.forEach((act, idx) => {
       db.optionalActivities.push({
-        id: crypto4.randomUUID(),
+        id: crypto3.randomUUID(),
         tripId: existing.id,
         sortOrder: idx,
         title: resolved.get(`activities.${idx}.title`),
@@ -2367,7 +2839,7 @@ function createApiRouter() {
         priceAmount: act.pricing === "EXTRA_COST" ? act.priceAmount ?? null : null
       });
     });
-    saveDb(db);
+    await saveDb(db);
     const removed = oldImageIds.filter((id) => !input.imageIds.includes(id));
     if (removed.length > 0) {
       await cleanupOrphanImages(removed);
@@ -2375,7 +2847,7 @@ function createApiRouter() {
     const updated = hydrateTrips(db, true).find((t) => t.id === existing.id);
     res.json({ trip: updated, failedFields: failedPaths, translatedChars });
   });
-  router.patch("/admin/trips/reorder", requireOwner, (req, res) => {
+  router.patch("/admin/trips/reorder", requireOwner, async (req, res) => {
     const schema = z2.object({ orderedIds: z2.array(z2.string()) });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
@@ -2387,10 +2859,10 @@ function createApiRouter() {
     db.trips.forEach((t) => {
       if (orderMap.has(t.id)) t.sortOrder = orderMap.get(t.id);
     });
-    saveDb(db);
+    await saveDb(db);
     res.json({ ok: true });
   });
-  router.patch("/admin/trips/:id/status", requireOwner, (req, res) => {
+  router.patch("/admin/trips/:id/status", requireOwner, async (req, res) => {
     const schema = z2.object({ status: z2.enum(["DRAFT", "PUBLISHED", "HIDDEN"]) });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
@@ -2415,7 +2887,7 @@ function createApiRouter() {
     }
     trip.status = parsed.data.status;
     trip.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-    saveDb(db);
+    await saveDb(db);
     res.json({ ok: true, status: trip.status });
   });
   router.delete("/admin/trips/:id", requireOwner, async (req, res) => {
@@ -2430,7 +2902,7 @@ function createApiRouter() {
     db.tripImages = db.tripImages.filter((ti) => ti.tripId !== trip.id);
     db.itineraryDays = db.itineraryDays.filter((d) => d.tripId !== trip.id);
     db.optionalActivities = db.optionalActivities.filter((a) => a.tripId !== trip.id);
-    saveDb(db);
+    await saveDb(db);
     if (imageIds.length > 0) {
       await cleanupOrphanImages(imageIds);
     }
@@ -2511,15 +2983,25 @@ function handleSitemapXml(req, res) {
 function createApp() {
   const app2 = express2();
   app2.set("trust proxy", 1);
-  getDb();
+  app2.use(async (req, res, next) => {
+    if (req.path.startsWith("/api") || req.path === "/sitemap.xml") {
+      try {
+        await loadDb();
+      } catch (err) {
+        next(err);
+        return;
+      }
+    }
+    next();
+  });
   app2.use((req, res, next) => {
     const csp = [
       "default-src 'self'",
       "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com data:",
-      "img-src 'self' https://res.cloudinary.com data: blob:",
-      "connect-src 'self' https://api.cloudinary.com ws: wss:",
+      "img-src 'self' https://res.cloudinary.com https://*.supabase.co data: blob:",
+      "connect-src 'self' https://api.cloudinary.com https://*.supabase.co ws: wss:",
       "object-src 'none'",
       "base-uri 'self'"
     ].join("; ");
@@ -2542,6 +3024,19 @@ function createApp() {
     console.warn("Skipping local uploads static directory:", err);
   }
   app2.use("/api", createApiRouter());
+  app2.use((err, req, res, next) => {
+    if (res.headersSent) {
+      next(err);
+      return;
+    }
+    console.error("[server] Unhandled request error:", err);
+    const message = err instanceof Error ? err.message : "Unexpected server error";
+    if (req.path.startsWith("/api")) {
+      res.status(500).json({ error: "\u062D\u062F\u062B \u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645. \u062D\u0627\u0648\u0644 \u0645\u0631\u0629 \u0623\u062E\u0631\u0649.", detail: message });
+    } else {
+      res.status(500).type("text/plain").send("Internal Server Error");
+    }
+  });
   return app2;
 }
 

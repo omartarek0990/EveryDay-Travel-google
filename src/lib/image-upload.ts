@@ -103,7 +103,7 @@ export async function uploadImageWithProgress(opts: {
     method: 'POST',
     headers,
     credentials: 'include',
-    body: JSON.stringify({ folder }),
+    body: JSON.stringify({ folder, fileName: file.name, mimeType: prepared.mimeType }),
     signal,
   });
   if (!signRes.ok) {
@@ -111,7 +111,7 @@ export async function uploadImageWithProgress(opts: {
     throw new Error(err.error || 'تعذر بدء رفع الصورة');
   }
   const signData = (await signRes.json()) as {
-    provider: 'CLOUDINARY' | 'STATIC';
+    provider: 'SUPABASE' | 'CLOUDINARY' | 'STATIC';
     uploadUrl: string;
     fields: Record<string, string>;
   };
@@ -132,6 +132,10 @@ export async function uploadImageWithProgress(opts: {
     xhr.onload = () => {
       signal.removeEventListener('abort', onAbort);
       if (xhr.status >= 200 && xhr.status < 300) {
+        if (signData.provider === 'SUPABASE') {
+          resolve(signData.fields.path);
+          return;
+        }
         try {
           const parsed = JSON.parse(xhr.responseText) as { public_id: string };
           resolve(parsed.public_id);
@@ -140,8 +144,8 @@ export async function uploadImageWithProgress(opts: {
         }
       } else {
         try {
-          const parsed = JSON.parse(xhr.responseText) as { error?: string };
-          reject(new Error(parsed.error || 'فشل رفع الصورة'));
+          const parsed = JSON.parse(xhr.responseText) as { error?: string; message?: string };
+          reject(new Error(parsed.error || parsed.message || 'فشل رفع الصورة'));
         } catch {
           reject(new Error('فشل رفع الصورة'));
         }
@@ -164,6 +168,14 @@ export async function uploadImageWithProgress(opts: {
       Object.entries(signData.fields).forEach(([k, v]) => formData.append(k, v));
       xhr.open('POST', signData.uploadUrl);
       xhr.send(formData);
+    } else if (signData.provider === 'SUPABASE') {
+      const uploadUrl = new URL(signData.uploadUrl, window.location.origin);
+      if (!uploadUrl.searchParams.has('token') && signData.fields.token) {
+        uploadUrl.searchParams.set('token', signData.fields.token);
+      }
+      xhr.open('PUT', uploadUrl.toString());
+      xhr.setRequestHeader('Content-Type', prepared.mimeType);
+      xhr.send(prepared.blob);
     } else {
       xhr.open('POST', signData.uploadUrl);
       xhr.withCredentials = true;

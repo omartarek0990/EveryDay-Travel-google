@@ -2,15 +2,16 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ImageRecord } from '../src/shared/types.ts';
+import { getStorageBucket, getSupabaseAdmin, getSupabaseUrl } from './supabase.ts';
 
 export interface UploadSignatureResult {
-  provider: 'CLOUDINARY' | 'STATIC';
+  provider: 'SUPABASE' | 'CLOUDINARY' | 'STATIC';
   uploadUrl: string;
   fields: Record<string, string>;
 }
 
 export interface VerifiedImageMetadata {
-  provider: 'CLOUDINARY' | 'STATIC';
+  provider: 'SUPABASE' | 'CLOUDINARY' | 'STATIC';
   publicId: string;
   url: string;
   width: number;
@@ -20,8 +21,8 @@ export interface VerifiedImageMetadata {
 }
 
 export interface ImageStorage {
-  readonly provider: 'CLOUDINARY' | 'STATIC';
-  signUpload(folder?: string): UploadSignatureResult;
+  readonly provider: 'SUPABASE' | 'CLOUDINARY' | 'STATIC';
+  signUpload(folder?: string, options?: { fileName?: string; mimeType?: string }): Promise<UploadSignatureResult>;
   verify(publicId: string): Promise<VerifiedImageMetadata>;
   destroy(publicId: string): Promise<void>;
   url(image: Pick<ImageRecord, 'provider' | 'publicId' | 'url'>, opts?: { width?: number }): string;
@@ -32,12 +33,126 @@ const LOCAL_UPLOAD_DIR = IS_SERVERLESS_READONLY
   ? path.join('/tmp', 'everyday-uploads')
   : path.resolve(process.cwd(), 'public', 'uploads');
 
+const MIME_TO_EXT: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/heic': 'heic',
+  'image/heif': 'heif',
+};
+
+function extensionFor(options?: { fileName?: string; mimeType?: string }): string {
+  const mime = options?.mimeType?.toLowerCase() || '';
+  if (MIME_TO_EXT[mime]) return MIME_TO_EXT[mime];
+  const ext = options?.fileName?.split('.').pop()?.toLowerCase() || '';
+  return /^[a-z0-9]{2,5}$/.test(ext) ? ext : 'jpg';
+}
+
+function sanitizeFolder(folder: string): string {
+  return (
+    folder
+      .replace(/[^a-z0-9/_-]/gi, '')
+      .replace(/^\/+|\/+$/g, '')
+      .slice(0, 120) || 'everyday'
+  );
+}
+
 function getUploadTokenSecret(): string {
   return process.env.SESSION_SECRET || globalThis.__everydayUploadSecret || (globalThis.__everydayUploadSecret = crypto.randomBytes(32).toString('hex'));
 }
 
 declare global {
   var __everydayUploadSecret: string | undefined;
+}
+
+class SupabaseStorage implements ImageStorage {
+  readonly provider = 'SUPABASE' as const;
+
+  async signUpload(
+    folder = 'everyday',
+    options?: { fileName?: string; mimeType?: string }
+  ): Promise<UploadSignatureResult> {
+    const bucket = getStorageBucket();
+    const objectPath = `${sanitizeFolder(folder)}/${crypto.randomUUID()}.${extensionFor(options)}`;
+    const { data, error } = await getSupabaseAdmin()
+      .storage.from(bucket)
+      .createSignedUploadUrl(objectPath);
+
+    if (error || !data) {
+      throw new Error(`Failed to sign Supabase upload: ${error?.message ?? 'unknown error'}`);
+    }
+
+    const baseUrl = getSupabaseUrl() ?? '';
+    const uploadUrl = /^https?:\/\//i.test(data.signedUrl)
+      ? data.signedUrl
+      : `${baseUrl}${data.signedUrl.startsWith('/') ? '' : '/'}${data.signedUrl}`;
+
+    return {
+      provider: 'SUPABASE',
+      uploadUrl,
+      fields: {
+        path: data.path ?? objectPath,
+        token: data.token,
+        bucket,
+      },
+    };
+  }
+
+  async verify(publicId: string): Promise<VerifiedImageMetadata> {
+    const bucket = getStorageBucket();
+    const supabase = getSupabaseAdmin();
+    const slash = publicId.lastIndexOf('/');
+    const dir = slash >= 0 ? publicId.slice(0, slash) : '';
+    const name = slash >= 0 ? publicId.slice(slash + 1) : publicId;
+
+    const { data, error } = await supabase.storage.from(bucket).list(dir, {
+      search: name,
+      limit: 100,
+    });
+    if (error) {
+      throw new Error(`Failed to verify Supabase upload: ${error.message}`);
+    }
+
+    const file = (data ?? []).find((item) => item.name === name);
+    if (!file) {
+      throw new Error('Uploaded file not found in Supabase Storage');
+    }
+
+    const metadata = (file.metadata ?? {}) as {
+      size?: number;
+      contentLength?: number;
+      mimetype?: string;
+    };
+
+    const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(publicId);
+    const format =
+      MIME_TO_EXT[metadata.mimetype?.toLowerCase() ?? ''] ||
+      name.split('.').pop()?.toLowerCase() ||
+      'jpg';
+
+    return {
+      provider: 'SUPABASE',
+      publicId,
+      url: publicData.publicUrl,
+      width: 1600,
+      height: 1200,
+      bytes: metadata.size ?? metadata.contentLength ?? 0,
+      format,
+    };
+  }
+
+  async destroy(publicId: string): Promise<void> {
+    if (publicId.startsWith('seed/') || publicId.startsWith('local/')) return;
+    const { error } = await getSupabaseAdmin().storage.from(getStorageBucket()).remove([publicId]);
+    if (error) {
+      console.error(`[ImageStorage] Supabase remove failed for ${publicId}: ${error.message}`);
+    }
+  }
+
+  url(image: Pick<ImageRecord, 'provider' | 'publicId' | 'url'>): string {
+    return image.url;
+  }
 }
 
 class CloudinaryStorage implements ImageStorage {
@@ -51,7 +166,7 @@ class CloudinaryStorage implements ImageStorage {
     return { cloudName, apiKey, apiSecret, uploadPreset };
   }
 
-  signUpload(folder = 'everyday'): UploadSignatureResult {
+  async signUpload(folder = 'everyday'): Promise<UploadSignatureResult> {
     const { cloudName, apiKey, apiSecret, uploadPreset } = this.config;
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const paramsToSign: Record<string, string> = {
@@ -156,7 +271,7 @@ class CloudinaryStorage implements ImageStorage {
 class StaticStorage implements ImageStorage {
   readonly provider = 'STATIC' as const;
 
-  signUpload(folder = 'everyday'): UploadSignatureResult {
+  async signUpload(folder = 'everyday'): Promise<UploadSignatureResult> {
     const exp = String(Date.now() + 5 * 60 * 1000);
     const nonce = crypto.randomBytes(12).toString('hex');
     const sig = crypto
@@ -232,15 +347,22 @@ class StaticStorage implements ImageStorage {
 export const staticStorage = new StaticStorage();
 
 export function getImageStorage(): ImageStorage {
+  const preference = process.env.IMAGE_STORAGE?.trim().toLowerCase();
+
+  const hasSupabase = Boolean(
+    process.env.SUPABASE_URL?.trim() && process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+  );
   const hasCloudinary =
     Boolean(process.env.CLOUDINARY_CLOUD_NAME) &&
     Boolean(process.env.CLOUDINARY_API_KEY) &&
     Boolean(process.env.CLOUDINARY_API_SECRET) &&
     Boolean(process.env.CLOUDINARY_UPLOAD_PRESET);
 
-  if (hasCloudinary) {
-    return new CloudinaryStorage();
-  }
+  if (preference === 'cloudinary' && hasCloudinary) return new CloudinaryStorage();
+  if (preference === 'static') return staticStorage;
+  if (preference === 'supabase') return new SupabaseStorage();
+  if (hasSupabase) return new SupabaseStorage();
+  if (hasCloudinary) return new CloudinaryStorage();
   return staticStorage;
 }
 

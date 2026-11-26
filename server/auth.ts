@@ -1,8 +1,8 @@
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import type { NextFunction, Request, Response } from 'express';
-import { getDb, saveDb } from './db.ts';
-import type { UserRecord } from '../src/shared/types.ts';
+import type { SessionRecord, UserRecord, UserRole } from '../src/shared/types.ts';
+import { getSupabaseAdmin } from './supabase.ts';
 
 const BCRYPT_COST = 12;
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -13,6 +13,30 @@ const DUMMY_HASH = '$2b$12$C6UzMDM.H6dfI/f/IKcEe.W0zQ6n4q5R7sT8uV9wX0yZ1aB2cD3e.
 
 export const SESSION_COOKIE_NAME = '__Host-session';
 export const FALLBACK_COOKIE_NAME = 'ed_session';
+
+type DbRow = Record<string, unknown>;
+
+function toUser(row: DbRow): UserRecord {
+  return {
+    id: String(row.id),
+    username: String(row.username),
+    passwordHash: String(row.password_hash),
+    role: (row.role as UserRole) ?? 'OWNER',
+    mustChangePassword: Boolean(row.must_change_password),
+    createdAt: String(row.created_at),
+  };
+}
+
+function toSession(row: DbRow): SessionRecord {
+  return {
+    id: String(row.id),
+    userId: String(row.user_id),
+    tokenHash: String(row.token_hash),
+    expiresAt: String(row.expires_at),
+    lastRefreshedAt: String(row.last_refreshed_at),
+    createdAt: String(row.created_at),
+  };
+}
 
 export function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, BCRYPT_COST);
@@ -45,76 +69,228 @@ export function getAttemptKey(username: string, ip: string): string {
     .digest('hex');
 }
 
-export function isLoginLocked(username: string, ip: string): boolean {
-  const db = getDb();
-  const key = getAttemptKey(username, ip);
-  const cutoff = Date.now() - LOCKOUT_WINDOW_MS;
-  const recentFailures = db.loginAttempts.filter(
-    (a) => a.key === key && new Date(a.createdAt).getTime() >= cutoff
-  );
-  return recentFailures.length >= MAX_LOGIN_FAILURES;
+// ---------------------------------------------------------------------------
+// Users
+// ---------------------------------------------------------------------------
+export async function countOwners(): Promise<number> {
+  const { count, error } = await getSupabaseAdmin()
+    .from('users')
+    .select('id', { count: 'exact', head: true })
+    .eq('role', 'OWNER');
+
+  if (error) throw new Error(`Failed to count owners: ${error.message}`);
+  return count ?? 0;
 }
 
-export function recordFailedLogin(username: string, ip: string): void {
-  const db = getDb();
-  const key = getAttemptKey(username, ip);
-  const cutoff = Date.now() - LOCKOUT_WINDOW_MS;
-  db.loginAttempts = db.loginAttempts.filter(
-    (a) => new Date(a.createdAt).getTime() >= cutoff
-  );
-  db.loginAttempts.push({
+export async function findOwnerByUsername(username: string): Promise<UserRecord | null> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('users')
+    .select('*')
+    .eq('username', username.toLowerCase())
+    .eq('role', 'OWNER')
+    .maybeSingle();
+
+  if (error) throw new Error(`Failed to load user: ${error.message}`);
+  return data ? toUser(data) : null;
+}
+
+export async function findFirstOwner(): Promise<UserRecord | null> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('users')
+    .select('*')
+    .eq('role', 'OWNER')
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw new Error(`Failed to load owner: ${error.message}`);
+  return data ? toUser(data) : null;
+}
+
+export async function findUserById(id: string): Promise<UserRecord | null> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('users')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) throw new Error(`Failed to load user: ${error.message}`);
+  return data ? toUser(data) : null;
+}
+
+export async function createUser(input: {
+  username: string;
+  passwordHash: string;
+  role?: UserRole;
+  mustChangePassword?: boolean;
+}): Promise<UserRecord> {
+  const row = {
     id: crypto.randomUUID(),
-    key,
-    createdAt: new Date().toISOString(),
-  });
-  saveDb(db);
+    username: input.username.toLowerCase(),
+    password_hash: input.passwordHash,
+    role: input.role ?? 'OWNER',
+    must_change_password: input.mustChangePassword ?? false,
+    created_at: new Date().toISOString(),
+  };
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('users')
+    .insert(row)
+    .select('*')
+    .single();
+
+  if (error || !data) {
+    throw new Error(`Failed to create user: ${error?.message ?? 'unknown error'}`);
+  }
+  return toUser(data);
 }
 
-export function clearFailedLogins(username: string, ip: string): void {
-  const db = getDb();
-  const key = getAttemptKey(username, ip);
-  db.loginAttempts = db.loginAttempts.filter((a) => a.key !== key);
-  saveDb(db);
+export async function updateUser(
+  id: string,
+  patch: { username?: string; passwordHash?: string; mustChangePassword?: boolean }
+): Promise<UserRecord> {
+  const row: DbRow = {};
+  if (patch.username !== undefined) row.username = patch.username.toLowerCase();
+  if (patch.passwordHash !== undefined) row.password_hash = patch.passwordHash;
+  if (patch.mustChangePassword !== undefined) row.must_change_password = patch.mustChangePassword;
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('users')
+    .update(row)
+    .eq('id', id)
+    .select('*')
+    .single();
+
+  if (error || !data) {
+    throw new Error(`Failed to update user: ${error?.message ?? 'unknown error'}`);
+  }
+  return toUser(data);
 }
 
-export function createSessionForUser(userId: string): { token: string; expiresAt: string } {
-  const db = getDb();
+// ---------------------------------------------------------------------------
+// Sessions
+// ---------------------------------------------------------------------------
+export async function createSessionForUser(
+  userId: string
+): Promise<{ token: string; expiresAt: string }> {
+  const supabase = getSupabaseAdmin();
   const token = crypto.randomBytes(32).toString('base64url');
   const tokenHash = hashSessionToken(token);
   const now = Date.now();
   const expiresAt = new Date(now + SESSION_TTL_MS).toISOString();
 
-  // Prune expired sessions
-  db.sessions = db.sessions.filter((s) => new Date(s.expiresAt).getTime() > now);
-  db.sessions.push({
-    id: crypto.randomUUID(),
-    userId,
-    tokenHash,
-    expiresAt,
-    lastRefreshedAt: new Date(now).toISOString(),
-    createdAt: new Date(now).toISOString(),
-  });
-  saveDb(db);
+  // Prune expired sessions before inserting the new one.
+  await supabase.from('sessions').delete().lt('expires_at', new Date(now).toISOString());
 
+  const { error } = await supabase.from('sessions').insert({
+    id: crypto.randomUUID(),
+    user_id: userId,
+    token_hash: tokenHash,
+    expires_at: expiresAt,
+    last_refreshed_at: new Date(now).toISOString(),
+    created_at: new Date(now).toISOString(),
+  });
+
+  if (error) throw new Error(`Failed to create session: ${error.message}`);
   return { token, expiresAt };
 }
 
-export function deleteSessionByToken(token: string): void {
-  const db = getDb();
+export async function findSessionByToken(token: string): Promise<SessionRecord | null> {
   const tokenHash = hashSessionToken(token);
-  db.sessions = db.sessions.filter((s) => s.tokenHash !== tokenHash);
-  saveDb(db);
+  const { data, error } = await getSupabaseAdmin()
+    .from('sessions')
+    .select('*')
+    .eq('token_hash', tokenHash)
+    .maybeSingle();
+
+  if (error) throw new Error(`Failed to load session: ${error.message}`);
+  return data ? toSession(data) : null;
 }
 
-export function deleteOtherSessions(userId: string, keepToken?: string): void {
-  const db = getDb();
-  const keepHash = keepToken ? hashSessionToken(keepToken) : null;
-  db.sessions = db.sessions.filter(
-    (s) => s.userId !== userId || (keepHash !== null && s.tokenHash === keepHash)
-  );
-  saveDb(db);
+export async function deleteSessionById(id: string): Promise<void> {
+  const { error } = await getSupabaseAdmin().from('sessions').delete().eq('id', id);
+  if (error) throw new Error(`Failed to delete session: ${error.message}`);
 }
 
+export async function deleteSessionByToken(token: string): Promise<void> {
+  const tokenHash = hashSessionToken(token);
+  const { error } = await getSupabaseAdmin()
+    .from('sessions')
+    .delete()
+    .eq('token_hash', tokenHash);
+  if (error) throw new Error(`Failed to delete session: ${error.message}`);
+}
+
+export async function deleteOtherSessions(userId: string, keepToken?: string): Promise<void> {
+  let query = getSupabaseAdmin().from('sessions').delete().eq('user_id', userId);
+  if (keepToken) {
+    query = query.neq('token_hash', hashSessionToken(keepToken));
+  }
+  const { error } = await query;
+  if (error) throw new Error(`Failed to delete sessions: ${error.message}`);
+}
+
+export async function deleteAllSessions(): Promise<void> {
+  const { error } = await getSupabaseAdmin()
+    .from('sessions')
+    .delete()
+    .neq('id', '00000000-0000-0000-0000-000000000000');
+  if (error) throw new Error(`Failed to delete sessions: ${error.message}`);
+}
+
+export async function refreshSession(session: SessionRecord): Promise<void> {
+  const now = Date.now();
+  const { error } = await getSupabaseAdmin()
+    .from('sessions')
+    .update({
+      expires_at: new Date(now + SESSION_TTL_MS).toISOString(),
+      last_refreshed_at: new Date(now).toISOString(),
+    })
+    .eq('id', session.id);
+
+  if (error) throw new Error(`Failed to refresh session: ${error.message}`);
+}
+
+// ---------------------------------------------------------------------------
+// Login attempts / lockout
+// ---------------------------------------------------------------------------
+export async function isLoginLocked(username: string, ip: string): Promise<boolean> {
+  const key = getAttemptKey(username, ip);
+  const cutoff = new Date(Date.now() - LOCKOUT_WINDOW_MS).toISOString();
+  const { count, error } = await getSupabaseAdmin()
+    .from('login_attempts')
+    .select('id', { count: 'exact', head: true })
+    .eq('key', key)
+    .gte('created_at', cutoff);
+
+  if (error) throw new Error(`Failed to check login attempts: ${error.message}`);
+  return (count ?? 0) >= MAX_LOGIN_FAILURES;
+}
+
+export async function recordFailedLogin(username: string, ip: string): Promise<void> {
+  const supabase = getSupabaseAdmin();
+  const key = getAttemptKey(username, ip);
+  const cutoff = new Date(Date.now() - LOCKOUT_WINDOW_MS).toISOString();
+
+  await supabase.from('login_attempts').delete().lt('created_at', cutoff);
+  const { error } = await supabase.from('login_attempts').insert({
+    id: crypto.randomUUID(),
+    key,
+    created_at: new Date().toISOString(),
+  });
+
+  if (error) throw new Error(`Failed to record login attempt: ${error.message}`);
+}
+
+export async function clearFailedLogins(username: string, ip: string): Promise<void> {
+  const key = getAttemptKey(username, ip);
+  const { error } = await getSupabaseAdmin().from('login_attempts').delete().eq('key', key);
+  if (error) throw new Error(`Failed to clear login attempts: ${error.message}`);
+}
+
+// ---------------------------------------------------------------------------
+// Request auth helpers
+// ---------------------------------------------------------------------------
 function parseCookies(cookieHeader: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   if (!cookieHeader) return out;
@@ -208,54 +384,70 @@ export interface AuthenticatedRequest extends Request {
   sessionToken?: string;
 }
 
-export function requireOwner(
+export async function resolveOwnerFromRequest(req: Request): Promise<UserRecord | null> {
+  const { token } = extractTokenFromRequest(req);
+  if (!token) return null;
+
+  const session = await findSessionByToken(token);
+  if (!session) return null;
+  if (new Date(session.expiresAt).getTime() <= Date.now()) {
+    await deleteSessionById(session.id);
+    return null;
+  }
+
+  const user = await findUserById(session.userId);
+  if (!user || user.role !== 'OWNER') return null;
+  return user;
+}
+
+export async function requireOwner(
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
-): void {
-  const { token, source } = extractTokenFromRequest(req);
-  if (!token) {
-    res.status(401).json({ error: 'غير مصرح. يرجى تسجيل الدخول.' });
-    return;
-  }
-
-  // CSRF check for cookie-authenticated state-changing requests
-  if (source === 'cookie' && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
-    if (!verifyMutationOrigin(req)) {
-      res.status(403).json({ error: 'Origin mismatch' });
+): Promise<void> {
+  try {
+    const { token, source } = extractTokenFromRequest(req);
+    if (!token) {
+      res.status(401).json({ error: 'غير مصرح. يرجى تسجيل الدخول.' });
       return;
     }
-  }
 
-  const db = getDb();
-  const tokenHash = hashSessionToken(token);
-  const now = Date.now();
-  const session = db.sessions.find((s) => s.tokenHash === tokenHash);
-
-  if (!session || new Date(session.expiresAt).getTime() <= now) {
-    if (session) {
-      db.sessions = db.sessions.filter((s) => s.id !== session.id);
-      saveDb(db);
+    // CSRF check for cookie-authenticated state-changing requests
+    if (source === 'cookie' && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+      if (!verifyMutationOrigin(req)) {
+        res.status(403).json({ error: 'Origin mismatch' });
+        return;
+      }
     }
-    res.status(401).json({ error: 'انتهت الجلسة. يرجى تسجيل الدخول مجدداً.' });
-    return;
-  }
 
-  const user = db.users.find((u) => u.id === session.userId && u.role === 'OWNER');
-  if (!user) {
-    res.status(401).json({ error: 'غير مصرح.' });
-    return;
-  }
+    const session = await findSessionByToken(token);
+    if (!session) {
+      res.status(401).json({ error: 'انتهت الجلسة. يرجى تسجيل الدخول مجدداً.' });
+      return;
+    }
 
-  // Refresh session expiry at most once per 24 hours
-  const lastRefreshed = new Date(session.lastRefreshedAt).getTime();
-  if (now - lastRefreshed >= SESSION_REFRESH_INTERVAL_MS) {
-    session.expiresAt = new Date(now + SESSION_TTL_MS).toISOString();
-    session.lastRefreshedAt = new Date(now).toISOString();
-    saveDb(db);
-  }
+    if (new Date(session.expiresAt).getTime() <= Date.now()) {
+      await deleteSessionById(session.id);
+      res.status(401).json({ error: 'انتهت الجلسة. يرجى تسجيل الدخول مجدداً.' });
+      return;
+    }
 
-  req.ownerUser = user;
-  req.sessionToken = token;
-  next();
+    const user = await findUserById(session.userId);
+    if (!user || user.role !== 'OWNER') {
+      res.status(401).json({ error: 'غير مصرح.' });
+      return;
+    }
+
+    // Refresh session expiry at most once per 24 hours
+    const lastRefreshed = new Date(session.lastRefreshedAt).getTime();
+    if (Date.now() - lastRefreshed >= SESSION_REFRESH_INTERVAL_MS) {
+      await refreshSession(session);
+    }
+
+    req.ownerUser = user;
+    req.sessionToken = token;
+    next();
+  } catch (err) {
+    next(err);
+  }
 }

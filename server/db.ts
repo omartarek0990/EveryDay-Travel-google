@@ -1,8 +1,5 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import crypto from 'node:crypto';
 import type {
-  DatabaseSchema,
+  ContentDatabaseSchema,
   DestinationRecord,
   GalleryImageRecord,
   HeroImageRecord,
@@ -12,17 +9,16 @@ import type {
   TripRecord,
   TripWithRelations,
 } from '../src/shared/types.ts';
+import { getSupabaseAdmin } from './supabase.ts';
 
-const IS_SERVERLESS_READONLY = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
-const BUNDLED_DB_PATH = path.resolve(process.cwd(), 'data', 'db.json');
-const DATA_DIR = IS_SERVERLESS_READONLY
-  ? path.join('/tmp', 'everyday-data')
-  : path.resolve(process.cwd(), 'data');
-const DB_PATH = path.join(DATA_DIR, 'db.json');
+const CACHE_TTL_MS = 1_000;
 
-let memoryCache: DatabaseSchema | null = null;
+let memoryCache: ContentDatabaseSchema | null = null;
+let memoryCacheLoadedAt = 0;
+let loadInFlight: Promise<ContentDatabaseSchema> | null = null;
+let saveQueue: Promise<void> = Promise.resolve();
 
-function createSeedDatabase(): DatabaseSchema {
+export function createSeedDatabase(): ContentDatabaseSchema {
   const now = new Date().toISOString();
 
   const images: ImageRecord[] = [
@@ -547,9 +543,6 @@ function createSeedDatabase(): DatabaseSchema {
   ];
 
   return {
-    users: [],
-    sessions: [],
-    loginAttempts: [],
     images,
     siteSettings,
     heroImages,
@@ -562,54 +555,345 @@ function createSeedDatabase(): DatabaseSchema {
   };
 }
 
-export function getDb(): DatabaseSchema {
-  if (memoryCache) {
+type DbRow = Record<string, unknown>;
+
+function asString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function asNumber(value: unknown, fallback = 0): number {
+  const num = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+function asBoolean(value: unknown, fallback = false): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function asRows(value: unknown): DbRow[] {
+  return Array.isArray(value) ? (value as DbRow[]) : [];
+}
+
+function asJson<T>(value: unknown, fallback: T): T {
+  return value === null || value === undefined ? fallback : (value as T);
+}
+
+function toSnakeImage(image: ImageRecord) {
+  return {
+    id: image.id,
+    provider: image.provider,
+    public_id: image.publicId,
+    url: image.url,
+    width: image.width,
+    height: image.height,
+    bytes: image.bytes,
+    format: image.format,
+    created_at: image.createdAt,
+  };
+}
+
+function fromSnakeImage(row: DbRow): ImageRecord {
+  return {
+    id: asString(row.id),
+    provider: asString(row.provider, 'STATIC') as ImageRecord['provider'],
+    publicId: asString(row.public_id),
+    url: asString(row.url),
+    width: asNumber(row.width, 1600),
+    height: asNumber(row.height, 1200),
+    bytes: asNumber(row.bytes, 0),
+    format: asString(row.format, 'jpg'),
+    createdAt: asString(row.created_at, new Date().toISOString()),
+  };
+}
+
+function toSnakeSettings(settings: SiteSettings) {
+  return {
+    id: settings.id,
+    company_name: settings.companyName,
+    logo_image_id: settings.logoImageId,
+    favicon_image_id: settings.faviconImageId,
+    phone: settings.phone,
+    whatsapp: settings.whatsapp,
+    email: settings.email,
+    address: settings.address,
+    map_url: settings.mapUrl,
+    tiktok_url: settings.tiktokUrl,
+    facebook_url: settings.facebookUrl,
+    instagram_url: settings.instagramUrl,
+    whatsapp_message: settings.whatsappMessage,
+    seo_title: settings.seoTitle,
+    seo_description: settings.seoDescription,
+    og_image_id: settings.ogImageId,
+    about_title: settings.aboutTitle,
+    about_body: settings.aboutBody,
+    hero_badge: settings.heroBadge,
+    hero_title: settings.heroTitle,
+    hero_subtitle: settings.heroSubtitle,
+    hero_description: settings.heroDescription,
+    hero_features: settings.heroFeatures,
+    hero_interval_seconds: settings.heroIntervalSeconds,
+    show_trips_section: settings.showTripsSection,
+    show_why_us_section: settings.showWhyUsSection,
+    show_gallery_section: settings.showGallerySection,
+    show_contact_section: settings.showContactSection,
+    why_us_items: settings.whyUsItems,
+    trips_intro: settings.tripsIntro,
+    gallery_title: settings.galleryTitle,
+    contact_intro: settings.contactIntro,
+    footer_tagline: settings.footerTagline,
+  };
+}
+
+function fromSnakeSettings(row: DbRow): SiteSettings {
+  return {
+    id: asString(row.id, 'default'),
+    companyName: asJson(row.company_name, { ar: '', en: '', enManual: false }),
+    logoImageId: (row.logo_image_id as string | null) ?? null,
+    faviconImageId: (row.favicon_image_id as string | null) ?? null,
+    phone: asString(row.phone),
+    whatsapp: asString(row.whatsapp),
+    email: asString(row.email),
+    address: asJson(row.address, { ar: '', en: '', enManual: false }),
+    mapUrl: asString(row.map_url),
+    tiktokUrl: asString(row.tiktok_url),
+    facebookUrl: asString(row.facebook_url),
+    instagramUrl: asString(row.instagram_url),
+    whatsappMessage: asJson(row.whatsapp_message, { ar: '', en: '', enManual: false }),
+    seoTitle: asJson(row.seo_title, { ar: '', en: '', enManual: false }),
+    seoDescription: asJson(row.seo_description, { ar: '', en: '', enManual: false }),
+    ogImageId: (row.og_image_id as string | null) ?? null,
+    aboutTitle: asJson(row.about_title, { ar: '', en: '', enManual: false }),
+    aboutBody: asJson(row.about_body, { ar: '', en: '', enManual: false }),
+    heroBadge: asJson(row.hero_badge, { ar: '', en: '', enManual: false }),
+    heroTitle: asJson(row.hero_title, { ar: '', en: '', enManual: false }),
+    heroSubtitle: asJson(row.hero_subtitle, { ar: '', en: '', enManual: false }),
+    heroDescription: asJson(row.hero_description, { ar: '', en: '', enManual: false }),
+    heroFeatures: asJson(row.hero_features, []),
+    heroIntervalSeconds: asNumber(row.hero_interval_seconds, 5),
+    showTripsSection: asBoolean(row.show_trips_section, true),
+    showWhyUsSection: asBoolean(row.show_why_us_section, true),
+    showGallerySection: asBoolean(row.show_gallery_section, true),
+    showContactSection: asBoolean(row.show_contact_section, true),
+    whyUsItems: asJson(row.why_us_items, []),
+    tripsIntro: asJson(row.trips_intro, { ar: '', en: '', enManual: false }),
+    galleryTitle: asJson(row.gallery_title, { ar: '', en: '', enManual: false }),
+    contactIntro: asJson(row.contact_intro, { ar: '', en: '', enManual: false }),
+    footerTagline: asJson(row.footer_tagline, { ar: '', en: '', enManual: false }),
+  };
+}
+
+export function toDbState(state: ContentDatabaseSchema) {
+  return {
+    images: state.images.map(toSnakeImage),
+    siteSettings: toSnakeSettings(state.siteSettings),
+    heroImages: state.heroImages.map((row) => ({
+      id: row.id,
+      image_id: row.imageId,
+      sort_order: row.sortOrder,
+    })),
+    destinations: state.destinations.map((row) => ({
+      id: row.id,
+      slug: row.slug,
+      name: row.name,
+      sort_order: row.sortOrder,
+      is_active: row.isActive,
+    })),
+    trips: state.trips.map((row) => ({
+      id: row.id,
+      slug: row.slug,
+      title: row.title,
+      destination_id: row.destinationId,
+      tagline: row.tagline,
+      badge: row.badge,
+      features: row.features,
+      description: row.description,
+      duration_days: row.durationDays,
+      price_amount: row.priceAmount,
+      price_prefix: row.pricePrefix,
+      price_unit: row.priceUnit,
+      status: row.status,
+      sort_order: row.sortOrder,
+      created_at: row.createdAt,
+      updated_at: row.updatedAt,
+    })),
+    tripImages: state.tripImages.map((row) => ({
+      id: row.id,
+      trip_id: row.tripId,
+      image_id: row.imageId,
+      sort_order: row.sortOrder,
+    })),
+    itineraryDays: state.itineraryDays.map((row) => ({
+      id: row.id,
+      trip_id: row.tripId,
+      sort_order: row.sortOrder,
+      title: row.title,
+      description: row.description,
+    })),
+    optionalActivities: state.optionalActivities.map((row) => ({
+      id: row.id,
+      trip_id: row.tripId,
+      sort_order: row.sortOrder,
+      title: row.title,
+      description: row.description,
+      pricing: row.pricing,
+      price_amount: row.priceAmount,
+    })),
+    galleryImages: state.galleryImages.map((row) => ({
+      id: row.id,
+      image_id: row.imageId,
+      caption: row.caption,
+      sort_order: row.sortOrder,
+      created_at: row.createdAt,
+    })),
+  };
+}
+
+export function fromDbState(raw: unknown): ContentDatabaseSchema {
+  const state = (raw ?? {}) as DbRow;
+  const settingsRow = state.siteSettings as DbRow | null | undefined;
+
+  return {
+    images: asRows(state.images).map(fromSnakeImage),
+    siteSettings: fromSnakeSettings(settingsRow ?? {}),
+    heroImages: asRows(state.heroImages).map((row) => ({
+      id: asString(row.id),
+      imageId: asString(row.image_id),
+      sortOrder: asNumber(row.sort_order),
+    })),
+    destinations: asRows(state.destinations).map((row) => ({
+      id: asString(row.id),
+      slug: asString(row.slug),
+      name: asJson(row.name, { ar: '', en: '', enManual: false }),
+      sortOrder: asNumber(row.sort_order),
+      isActive: asBoolean(row.is_active, true),
+    })),
+    trips: asRows(state.trips).map((row) => ({
+      id: asString(row.id),
+      slug: asString(row.slug),
+      title: asJson(row.title, { ar: '', en: '', enManual: false }),
+      destinationId: asString(row.destination_id),
+      tagline: asJson(row.tagline, { ar: '', en: '', enManual: false }),
+      badge: (row.badge as TripRecord['badge']) ?? null,
+      features: asJson(row.features, []),
+      description: asJson(row.description, { ar: '', en: '', enManual: false }),
+      durationDays: row.duration_days === null ? null : asNumber(row.duration_days),
+      priceAmount: row.price_amount === null ? null : asNumber(row.price_amount),
+      pricePrefix: asString(row.price_prefix, 'NONE') as TripRecord['pricePrefix'],
+      priceUnit: asString(row.price_unit, 'PER_PERSON') as TripRecord['priceUnit'],
+      status: asString(row.status, 'DRAFT') as TripRecord['status'],
+      sortOrder: asNumber(row.sort_order),
+      createdAt: asString(row.created_at, new Date().toISOString()),
+      updatedAt: asString(row.updated_at, new Date().toISOString()),
+    })),
+    tripImages: asRows(state.tripImages).map((row) => ({
+      id: asString(row.id),
+      tripId: asString(row.trip_id),
+      imageId: asString(row.image_id),
+      sortOrder: asNumber(row.sort_order),
+    })),
+    itineraryDays: asRows(state.itineraryDays).map((row) => ({
+      id: asString(row.id),
+      tripId: asString(row.trip_id),
+      sortOrder: asNumber(row.sort_order),
+      title: asJson(row.title, { ar: '', en: '', enManual: false }),
+      description: asJson(row.description, { ar: '', en: '', enManual: false }),
+    })),
+    optionalActivities: asRows(state.optionalActivities).map((row) => ({
+      id: asString(row.id),
+      tripId: asString(row.trip_id),
+      sortOrder: asNumber(row.sort_order),
+      title: asJson(row.title, { ar: '', en: '', enManual: false }),
+      description: asJson(row.description, { ar: '', en: '', enManual: false }),
+      pricing: asString(row.pricing, 'FREE') as ContentDatabaseSchema['optionalActivities'][number]['pricing'],
+      priceAmount: row.price_amount === null ? null : asNumber(row.price_amount),
+    })),
+    galleryImages: asRows(state.galleryImages).map((row) => ({
+      id: asString(row.id),
+      imageId: asString(row.image_id),
+      caption: (row.caption as GalleryImageRecord['caption']) ?? null,
+      sortOrder: asNumber(row.sort_order),
+      createdAt: asString(row.created_at, new Date().toISOString()),
+    })),
+  };
+}
+
+async function persistState(state: ContentDatabaseSchema): Promise<void> {
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase.rpc('replace_site_state', {
+    payload: toDbState(state),
+  });
+  if (error) {
+    throw new Error(`Failed to save site state to Supabase: ${error.message}`);
+  }
+}
+
+/**
+ * Loads the dashboard-editable state from Supabase. The result is cached for
+ * a very short time to keep public page requests cheap on long-running servers.
+ * Every admin mutation calls saveDb(), which refreshes the cache immediately.
+ */
+export async function loadDb(options: { force?: boolean } = {}): Promise<ContentDatabaseSchema> {
+  if (!options.force && memoryCache && Date.now() - memoryCacheLoadedAt < CACHE_TTL_MS) {
     return memoryCache;
   }
-  const candidatePaths = IS_SERVERLESS_READONLY ? [DB_PATH, BUNDLED_DB_PATH] : [DB_PATH];
-  for (const candidate of candidatePaths) {
-    if (fs.existsSync(candidate)) {
-      try {
-        const raw = fs.readFileSync(candidate, 'utf-8');
-        memoryCache = JSON.parse(raw) as DatabaseSchema;
-        return memoryCache;
-      } catch (err) {
-        console.error(`Failed to read db from ${candidate}:`, err);
-      }
+  if (loadInFlight) return loadInFlight;
+
+  loadInFlight = (async () => {
+    const supabase = getSupabaseAdmin();
+    const { data, error } = await supabase.rpc('get_site_state');
+    if (error) {
+      throw new Error(
+        `Failed to load site state from Supabase: ${error.message}. ` +
+          'Make sure supabase/migrations/0001_init.sql has been applied.'
+      );
     }
+
+    const rawSettings = (data as DbRow | null)?.siteSettings;
+    if (!rawSettings) {
+      const seeded = createSeedDatabase();
+      await persistState(seeded);
+      memoryCache = seeded;
+      memoryCacheLoadedAt = Date.now();
+      return seeded;
+    }
+
+    const state = fromDbState(data);
+    memoryCache = state;
+    memoryCacheLoadedAt = Date.now();
+    return state;
+  })().finally(() => {
+    loadInFlight = null;
+  });
+
+  return loadInFlight;
+}
+
+export function getDb(): ContentDatabaseSchema {
+  if (!memoryCache) {
+    throw new Error('Database not loaded. Call loadDb() before getDb().');
   }
-  memoryCache = createSeedDatabase();
-  saveDb(memoryCache);
   return memoryCache;
 }
 
-export function saveDb(next: DatabaseSchema): void {
+/**
+ * Persists the editable state to Supabase. Calls are serialized per process so
+ * two saves from the same instance never race each other.
+ */
+export async function saveDb(next: ContentDatabaseSchema): Promise<void> {
+  const run = saveQueue.then(() => persistState(next));
+  saveQueue = run.catch(() => undefined);
+  await run;
   memoryCache = next;
-  try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    const tmpPath = path.join(DATA_DIR, `db.${crypto.randomUUID()}.tmp.json`);
-    fs.writeFileSync(tmpPath, JSON.stringify(next, null, 2), 'utf-8');
-    fs.renameSync(tmpPath, DB_PATH);
-  } catch (err) {
-    console.warn('Unable to persist db.json to disk, keeping in-memory state:', err);
-  }
+  memoryCacheLoadedAt = Date.now();
 }
 
-export function resetDbToSeed(): DatabaseSchema {
+export async function resetDbToSeed(): Promise<ContentDatabaseSchema> {
   const seeded = createSeedDatabase();
-  // Preserve existing users & sessions when re-seeding content
-  const existing = fs.existsSync(DB_PATH) || fs.existsSync(BUNDLED_DB_PATH) ? getDb() : null;
-  if (existing) {
-    seeded.users = existing.users;
-    seeded.sessions = existing.sessions;
-  }
-  saveDb(seeded);
+  await saveDb(seeded);
   return seeded;
 }
 
-export function hydrateTrips(db: DatabaseSchema, includeUnpublished = false): TripWithRelations[] {
+export function hydrateTrips(db: ContentDatabaseSchema, includeUnpublished = false): TripWithRelations[] {
   const imageMap = new Map(db.images.map((img) => [img.id, img]));
   const destMap = new Map(db.destinations.map((d) => [d.id, d]));
 
@@ -641,7 +925,7 @@ export function hydrateTrips(db: DatabaseSchema, includeUnpublished = false): Tr
     });
 }
 
-export function buildPublicPayload(db: DatabaseSchema): PublicSitePayload {
+export function buildPublicPayload(db: ContentDatabaseSchema): PublicSitePayload {
   const imageMap = new Map(db.images.map((img) => [img.id, img]));
 
   const heroImages: HeroImageRecord[] = [...db.heroImages]

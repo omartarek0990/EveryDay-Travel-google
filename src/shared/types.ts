@@ -7,7 +7,7 @@ export interface LocalizedText {
 }
 
 export type UserRole = 'OWNER' | 'SALES';
-export type ImageProvider = 'CLOUDINARY' | 'STATIC';
+export type ImageProvider = 'SUPABASE' | 'CLOUDINARY' | 'STATIC';
 export type PricePrefix = 'NONE' | 'STARTING_FROM';
 export type PriceUnit = 'PER_PERSON' | 'PER_TRIP' | 'NONE';
 export type TripStatus = 'DRAFT' | 'PUBLISHED' | 'HIDDEN';
@@ -193,3 +193,13 @@ export interface DatabaseSchema {
   optionalActivities: OptionalActivityRecord[];
   galleryImages: GalleryImageRecord[];
 }
+
+/**
+ * Everything that can be edited from the owner dashboard. Auth tables
+ * (users, sessions, loginAttempts) are managed separately so that routine
+ * session refreshes can never overwrite content edits.
+ */
+export type ContentDatabaseSchema = Omit<
+  DatabaseSchema,
+  'users' | 'sessions' | 'loginAttempts'
+>;
