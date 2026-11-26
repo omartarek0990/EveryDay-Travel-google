@@ -5,9 +5,10 @@ import { useI18n } from '../I18nProvider';
 import { buildWhatsAppUrl, formatDaysCount, formatTripPrice } from '../../shared/format';
 import type { SiteSettings, TripWithRelations } from '../../shared/types';
 import { ResilientImage } from '../ResilientImage';
+import { prefetchTripDetail } from '../../lib/prefetch';
 import { WhatsAppIcon } from './WhatsAppIcon';
 
-export function TripCard({
+function TripCardBase({
   trip,
   settings,
 }: {
@@ -78,6 +79,8 @@ export function TripCard({
   return (
     <Link
       to={`/${locale}/trips/${trip.slug}`}
+      onMouseEnter={prefetchTripDetail}
+      onFocus={prefetchTripDetail}
       onClick={(e) => {
         if (didSwipe.current) {
           e.preventDefault();
@@ -280,3 +283,6 @@ export function TripCard({
     </Link>
   );
 }
+
+/** Cards are rendered once per trip; memo keeps list re-renders cheap. */
+export const TripCard = React.memo(TripCardBase);

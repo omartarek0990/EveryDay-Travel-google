@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import 'express-async-errors';
 import express, { type NextFunction, type Request, type Response } from 'express';
+import { applyApiCacheHeaders } from './cache-headers.ts';
 import { loadDb } from './db.ts';
 import { createApiRouter } from './routes.ts';
 import { handleRobotsTxt, handleSitemapXml } from './seo.ts';
@@ -63,6 +64,9 @@ export function createApp() {
     console.warn('Skipping local uploads static directory:', err);
   }
 
+  // API cache policy (public payload vs. private admin/auth/upload routes)
+  app.use(applyApiCacheHeaders);
+
   // API Routes
   app.use('/api', createApiRouter());
 
@@ -76,6 +80,8 @@ export function createApp() {
     const message = err instanceof Error ? err.message : 'Unexpected server error';
 
     if (req.path.startsWith('/api')) {
+      // Never let the CDN cache an error response.
+      res.setHeader('Cache-Control', 'no-store');
       res.status(500).json({ error: 'حدث خطأ في الخادم. حاول مرة أخرى.', detail: message });
     } else {
       res.status(500).type('text/plain').send('Internal Server Error');

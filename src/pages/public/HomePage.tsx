@@ -5,16 +5,15 @@ import { useI18n } from '../../components/I18nProvider';
 import { usePublicData } from '../../components/PublicDataContext';
 import { AboutHighlightsBanner } from '../../components/public/AboutHighlightsBanner';
 import { HeroSlideshow } from '../../components/public/HeroSlideshow';
-import { Lightbox, type LightboxItem } from '../../components/public/Lightbox';
+import { HomeGallery } from '../../components/public/HomeGallery';
 import { PublicLayout } from '../../components/public/PublicLayout';
 import { SeoHead } from '../../components/public/SeoHead';
 import { TripCard } from '../../components/public/TripCard';
 import { WhatsAppIcon } from '../../components/public/WhatsAppIcon';
-import { ResilientImage } from '../../components/ResilientImage';
 import { buildWhatsAppUrl, isSafeExternalHttpsUrl } from '../../shared/format';
+import { prefetchTripDetail } from '../../lib/prefetch';
 
 const TRIPS_PAGE_SIZE = 12;
-const GALLERY_PAGE_SIZE = 9;
 
 export function HomePage() {
   const { messages, t } = useI18n();
@@ -22,8 +21,20 @@ export function HomePage() {
   const location = useLocation();
   const [selectedDestSlug, setSelectedDestSlug] = useState<string>('all');
   const [visibleTripsCount, setVisibleTripsCount] = useState<number>(TRIPS_PAGE_SIZE);
-  const [visibleGalleryCount, setVisibleGalleryCount] = useState<number>(GALLERY_PAGE_SIZE);
-  const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
+
+  // Warm the trip detail chunk once the landing page is idle.
+  useEffect(() => {
+    const idleWindow = window as unknown as {
+      requestIdleCallback?: (cb: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    if (idleWindow.requestIdleCallback) {
+      const handle = idleWindow.requestIdleCallback(() => prefetchTripDetail(), { timeout: 3000 });
+      return () => idleWindow.cancelIdleCallback?.(handle);
+    }
+    const handle = window.setTimeout(prefetchTripDetail, 1500);
+    return () => window.clearTimeout(handle);
+  }, []);
 
   useEffect(() => {
     if (loading || !data || !location.hash) return;
@@ -92,19 +103,7 @@ export function HomePage() {
     Boolean(address.text) ||
     socials.length > 0;
 
-  const shownGallery = galleryImages.slice(0, visibleGalleryCount);
-  const hasMoreGallery = galleryImages.length > visibleGalleryCount;
-
-  const lightboxItems: LightboxItem[] = galleryImages.map((item) => {
-    const cap = item.caption ? t(item.caption) : null;
-    return {
-      url: item.image?.url || '',
-      alt: cap?.text || companyName.text,
-      caption: cap?.text,
-      captionIsFallbackAr: cap?.isFallbackAr,
-      image: item.image ?? null,
-    };
-  });
+  const shownGallery = galleryImages;
 
   const orgJsonLd = {
     '@context': 'https://schema.org',
@@ -248,50 +247,7 @@ export function HomePage() {
               {messages.empty.gallery}
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {shownGallery.map((item, idx) => {
-                const cap = item.caption ? t(item.caption) : null;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setLightboxIdx(idx)}
-                    className="group relative aspect-[4/3] rounded-2xl overflow-hidden bg-surface border border-border text-start"
-                  >
-                    <ResilientImage
-                      image={item.image}
-                      alt={cap?.text || companyName.text}
-                      sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
-                      maxWidth={1200}
-                      className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-                    />
-                    {cap?.text && (
-                      <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/80 via-black/30 to-transparent">
-                        <p
-                          lang={cap.isFallbackAr ? 'ar' : undefined}
-                          dir={cap.isFallbackAr ? 'rtl' : undefined}
-                          className="text-sm font-medium text-white line-clamp-2"
-                        >
-                          {cap.text}
-                        </p>
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {hasMoreGallery && (
-            <div className="mt-10 flex justify-center">
-              <button
-                type="button"
-                onClick={() => setVisibleGalleryCount((count) => count + GALLERY_PAGE_SIZE)}
-                className="px-6 py-3 rounded-xl border border-border bg-surface hover:bg-surface-alt text-ink font-semibold text-sm transition-colors"
-              >
-                {messages.actions.showMore}
-              </button>
-            </div>
+            <HomeGallery items={shownGallery} />
           )}
         </div>
       </section>
@@ -533,13 +489,6 @@ export function HomePage() {
           </div>
         </div>
       </section>
-
-      <Lightbox
-        items={lightboxItems}
-        activeIndex={lightboxIdx}
-        onClose={() => setLightboxIdx(null)}
-        onChangeIndex={(i) => setLightboxIdx(i)}
-      />
     </PublicLayout>
   );
 }

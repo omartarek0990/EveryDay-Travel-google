@@ -173,3 +173,149 @@ rollback is `update images set variants = null, avg_color = null where …`.
 6. **Rollback**: `update public.images set variants = null, avg_color = null;`
    then redeploy any commit before this branch. No storage object is deleted by
    this branch.
+
+---
+
+# Performance sprint — part 2: JavaScript, fonts and caching
+
+Branch `perf-2-js-cache`. Scope: JS/CSS/fonts/dependencies/cache headers only.
+No design, copy, RTL, hero-rule or dashboard-feature changes; `vercel.json`
+rewrites untouched.
+
+## Bundle before and after
+
+Measured locally with `npm run build` (raw / gzip as reported by Vite).
+
+| Chunk | Before (raw / gzip) | After (raw / gzip) | Notes |
+| --- | --- | --- | --- |
+| Entry `index-*.js` | 595.04 KB / 172.44 KB | **262.27 KB / 78.97 KB** | landing page + router + shared UI |
+| `ResilientImage-*.js` (shared, loaded on the landing page) | — | 58.15 KB / 21.63 KB | shared by home + lazy pages |
+| **Initial public JS** | **595.04 KB / 172.44 KB** | **320.42 KB / 100.60 KB** | target ≤ 110 KB gzip ✅ |
+| `AdminApp-*.js` | (inside the 595 KB chunk) | 266.86 KB / 73.12 KB | lazy, only /admin |
+| `TripDetailPage-*.js` | (inside the 595 KB chunk) | 10.26 KB / 2.98 KB | lazy + prefetched |
+| `Lightbox-*.js` | (inside the 595 KB chunk) | 2.78 KB / 1.15 KB | lazy, only on open |
+| `index-*.css` | 54.86 KB / 9.64 KB | 60.81 KB / 12.76 KB | +3.1 KB gzip from self-hosted `@font-face` rules |
+| `dist/` total | 2.70 MB | 2.86 MB | +fonts (118 KB) |
+
+Requests on a first public load: 1 HTML, 1 CSS, 2 JS (entry + shared
+`ResilientImage` chunk), 1–2 woff2 subset files (see below). No Google Fonts
+request, no `/api/auth/*`, no `/api/admin/*`.
+
+## What changed
+
+### Admin code and calls
+`AdminAuthProvider` moved out of the app root into `src/admin/AdminApp.tsx`,
+which is a `React.lazy` route mounted only at `/admin/*`. The entry chunk now
+contains no `/api/auth`, `/api/admin`, `@dnd-kit` or `sonner` code (verified by
+grepping the built chunk); the admin chunk contains all seven `/api/auth` calls.
+
+### Code splitting
+`TripDetailPage`, `Lightbox` and the whole dashboard are lazy. Suspense
+fallbacks are skeleton screens with the same dimensions as the real content
+(`src/components/public/PageSkeletons.tsx`). `ar.json`/`en.json` are 3.2 KB and
+2.6 KB raw (<1 KB gzip), so they stay in the main chunk (a dynamic import would
+add a request before first render). All `lucide-react` imports are named imports,
+so tree shaking works.
+
+### Prefetch
+`src/lib/prefetch.ts` warms the trip-detail chunk from the landing page: in an
+idle callback after mount, and on `mouseenter`/`focus` of a trip card.
+
+### Dependencies
+Removed `motion` (never imported) and `autoprefixer` (unused with Tailwind v4).
+Moved `vite`, `vitest`, `@vitejs/plugin-react`, `@tailwindcss/vite`, `esbuild`,
+`tsx` and every `@types/*` to `devDependencies`. Everything the server bundle
+imports stays in `dependencies`; `npm run build:api` reports these externals and
+the bundle loads in plain Node:
+
+```
+@google/genai, @supabase/supabase-js, bcryptjs, express, zod, node:crypto,
+node:fs, node:path, dotenv/config, express-async-errors
+```
+
+`npx knip` (run once, not added to package.json) reported: unused files
+`api/index.js` (build artifact) and the four never-routed public pages
+(`AboutPage`, `ContactPage`, `GalleryPage`, `TripsPage`); unused dependencies
+`@hookform/resolvers` and `react-hook-form`; unused devDependency
+`@types/bcryptjs`. Those are left untouched (out of scope for this part) except
+for the moves listed above.
+
+### Fonts
+Google Fonts links and preconnects removed from `index.html`. Self-hosted with
+`@fontsource-variable/cairo` (Arabic + Latin + Latin-ext subsets) and
+`@fontsource-variable/plus-jakarta-sans` (Latin + Latin-ext), both
+`font-display: swap`. The main Arabic woff2 is preloaded through a small Vite
+plugin (`preload-arabic-font` in `vite.config.ts`) because the file is emitted
+with a content hash.
+
+Playfair Display is **kept**: it is the italic accent of the "Every" wordmark in
+`BrandLogo`, which is visible design. It is vendored as a single weight
+(600 italic), Latin subset only, at
+`public/fonts/playfair-display-italic-600-latin.woff2` (22.6 KB) — no third
+package and no Google request.
+
+Font files a page downloads:
+
+| Page | Files |
+| --- | --- |
+| Arabic landing | `cairo-arabic-wght-normal` (30.9 KB) + `playfair-…-latin` (22.6 KB); `cairo-latin` (33.8 KB) only if Latin glyphs appear |
+| English landing | `plus-jakarta-sans-latin` (27.3 KB) + `playfair-…-latin` (22.6 KB); `cairo-arabic` if Arabic fallback text renders |
+
+Fallback font metrics (`size-adjust`) were not added: a swap-induced shift could
+not be measured in this sandbox. Verify CLS on the preview (see Risks).
+
+### Re-renders
+- Hero timer state was already inside `HeroSlideshow`; unchanged.
+- Lightbox open/close state moved from `HomePage` into
+  `src/components/public/HomeGallery.tsx`, together with the "Show more"
+  counter.
+- `TripCard` is wrapped in `React.memo`; the `PublicDataContext` value is
+  memoized with `useMemo`. No other memoization was added.
+
+### Cache headers
+Server (`server/cache-headers.ts`, applied in `server/app.ts`):
+
+| Path | Cache-Control |
+| --- | --- |
+| `/api/public/*` | `public, s-maxage=60, stale-while-revalidate=600` |
+| `/api/public/*?fresh=1` | `no-store` |
+| `/api/auth/*`, `/api/admin/*`, `/api/uploads/*` | `no-store` |
+| API error responses (5xx) | `no-store` |
+
+The client drops `cache: 'no-store'` from the normal public fetch; only the
+admin refresh (`refreshPublic({ fresh: true })`) requests `?fresh=1`, so the
+dashboard shows a saved edit immediately while public visitors may see it up to
+60 s later (documented in the README).
+
+`vercel.json` (headers only, rewrites untouched):
+
+| Source | Cache-Control |
+| --- | --- |
+| `/assets/(.*)` (hashed Vite output) | `public, max-age=31536000, immutable` |
+| `/fonts/(.*)` | `public, max-age=31536000, immutable` |
+| `/uploads/(.*)` | `public, max-age=31536000, immutable` |
+| `/assets/img/(.*)` (not content-hashed) | `public, max-age=604800, stale-while-revalidate=86400` |
+
+Tests: `server/cache-headers.test.ts` covers public vs. `fresh=1` vs.
+auth/admin/upload and the Express middleware.
+
+### Compression
+No compression middleware was added (Vercel compresses at the platform level).
+Manual check:
+
+```bash
+curl -I -H 'Accept-Encoding: br' https://<preview-url>/assets/<main js file> \
+  && # expect: content-encoding: br
+```
+
+## Manual steps for Omar
+
+1. Push the branch and open the Vercel Preview (connect the project to Git first
+   if previews are not automatic).
+2. Check `content-encoding: br` with the curl command above.
+3. Run Lighthouse (mobile + desktop) and compare with the part 1 baseline.
+4. Log in to `/admin`, save a small change, and confirm it appears in the
+   dashboard immediately and on the public site within ~60 s.
+5. Switch AR/EN and confirm the fonts and the italic "Every" wordmark look the
+   same as before, and that there is no visible shift when the font loads.
+

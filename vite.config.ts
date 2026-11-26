@@ -27,6 +27,24 @@ export default defineConfig(() => {
           }
         },
       },
+      // Self-hosted fonts are emitted with hashed names, so the preload hint for
+      // the Arabic subset can only be resolved after the bundle exists.
+      {
+        name: 'preload-arabic-font',
+        apply: 'build',
+        transformIndexHtml: {
+          order: 'post',
+          handler(html: string, ctx: { bundle?: Record<string, unknown> }) {
+            const files = Object.keys(ctx.bundle ?? {});
+            const arabic = files.find((file) => /cairo-arabic-wght-normal.*\.woff2$/.test(file));
+            if (!arabic) {
+              return html;
+            }
+            const link = `<link rel="preload" href="/${arabic}" as="font" type="font/woff2" crossorigin>`;
+            return html.replace('</head>', `    ${link}\n  </head>`);
+          },
+        },
+      },
     ],
     resolve: {
       alias: {

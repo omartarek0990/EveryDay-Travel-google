@@ -1,11 +1,23 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import type { PublicSitePayload } from '../shared/types';
+
+interface RefreshOptions {
+  /** Admin path: bypass the edge cache so saved edits show immediately. */
+  fresh?: boolean;
+}
 
 interface PublicDataContextValue {
   data: PublicSitePayload | null;
   loading: boolean;
   error: string | null;
-  refresh: () => Promise<void>;
+  refresh: (options?: RefreshOptions) => Promise<void>;
 }
 
 const PublicDataContext = createContext<PublicDataContextValue | null>(null);
@@ -15,9 +27,13 @@ export function PublicDataProvider({ children }: { children: React.ReactNode }) 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options?: RefreshOptions) => {
     try {
-      const res = await fetch('/api/public/site', { cache: 'no-store' });
+      // The normal path is served from the CDN (s-maxage=60); the admin path
+      // appends fresh=1 so the server answers with no-store and current data.
+      const res = await fetch(options?.fresh ? '/api/public/site?fresh=1' : '/api/public/site', {
+        ...(options?.fresh ? { cache: 'no-store' as RequestCache } : {}),
+      });
       if (!res.ok) throw new Error('Failed to load site data');
       const json = (await res.json()) as PublicSitePayload;
       setData(json);
@@ -33,11 +49,12 @@ export function PublicDataProvider({ children }: { children: React.ReactNode }) 
     refresh();
   }, [refresh]);
 
-  return (
-    <PublicDataContext.Provider value={{ data, loading, error, refresh }}>
-      {children}
-    </PublicDataContext.Provider>
+  const value = useMemo(
+    () => ({ data, loading, error, refresh }),
+    [data, loading, error, refresh]
   );
+
+  return <PublicDataContext.Provider value={value}>{children}</PublicDataContext.Provider>;
 }
 
 export function usePublicData(): PublicDataContextValue {

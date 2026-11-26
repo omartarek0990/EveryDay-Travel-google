@@ -90,7 +90,8 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       if (res.ok) {
         const json = (await res.json()) as AdminDataPayload;
         setAdminData(json);
-        await refreshPublic();
+        // Bypass the 60 s edge cache so the dashboard shows the saved edit at once.
+        await refreshPublic({ fresh: true });
       }
     } finally {
       setDataLoading(false);

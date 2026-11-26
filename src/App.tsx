@@ -1,23 +1,19 @@
-import React, { useEffect } from 'react';
+import React, { Suspense, lazy, useEffect } from 'react';
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { I18nProvider } from './components/I18nProvider';
 import { PublicDataProvider, usePublicData } from './components/PublicDataContext';
-import { AdminAuthProvider } from './components/admin/AdminAuthContext';
+import { AdminShellSkeleton, TripDetailSkeleton } from './components/public/PageSkeletons';
 import { imageProps } from './lib/image-url';
 import type { Locale } from './shared/types';
 import { HomePage } from './pages/public/HomePage';
 import { NotFoundPage } from './pages/public/NotFoundPage';
-import { TripDetailPage } from './pages/public/TripDetailPage';
-import { AdminAccountPage } from './pages/admin/AdminAccountPage';
-import { AdminDestinationsPage } from './pages/admin/AdminDestinationsPage';
-import { AdminGalleryPage } from './pages/admin/AdminGalleryPage';
-import { AdminHomePage } from './pages/admin/AdminHomePage';
-import { AdminLoginPage } from './pages/admin/AdminLoginPage';
-import { AdminOverviewPage } from './pages/admin/AdminOverviewPage';
-import { AdminResetPage } from './pages/admin/AdminResetPage';
-import { AdminSettingsPage } from './pages/admin/AdminSettingsPage';
-import { AdminTripFormPage } from './pages/admin/AdminTripFormPage';
-import { AdminTripsListPage } from './pages/admin/AdminTripsListPage';
+
+// The dashboard (and its API calls) is a separate chunk that only /admin loads.
+const AdminApp = lazy(() => import('./admin/AdminApp'));
+// Trip detail is a secondary page: fetched on demand, prefetched from the landing page.
+const TripDetailPage = lazy(() =>
+  import('./pages/public/TripDetailPage').then((module) => ({ default: module.TripDetailPage }))
+);
 
 function ScrollToTop() {
   const { pathname, hash } = useLocation();
@@ -65,54 +61,63 @@ export default function App() {
   return (
     <BrowserRouter>
       <PublicDataProvider>
-        <AdminAuthProvider>
-          <ScrollToTop />
-          <FaviconSync />
-          <Routes>
-            <Route path="/" element={<RootRedirect />} />
+        <ScrollToTop />
+        <FaviconSync />
+        <Routes>
+          <Route path="/" element={<RootRedirect />} />
 
-            <Route path="/ar" element={<LocaleShell locale="ar" />}>
-              <Route index element={<HomePage />} />
-              <Route path="trips" element={<Navigate to="/ar#trips" replace />} />
-              <Route path="trips/:slug" element={<TripDetailPage />} />
-              <Route path="gallery" element={<Navigate to="/ar#gallery" replace />} />
-              <Route path="about" element={<Navigate to="/ar#about" replace />} />
-              <Route path="contact" element={<Navigate to="/ar#contact" replace />} />
-              <Route path="*" element={<NotFoundPage />} />
-            </Route>
-
-            <Route path="/en" element={<LocaleShell locale="en" />}>
-              <Route index element={<HomePage />} />
-              <Route path="trips" element={<Navigate to="/en#trips" replace />} />
-              <Route path="trips/:slug" element={<TripDetailPage />} />
-              <Route path="gallery" element={<Navigate to="/en#gallery" replace />} />
-              <Route path="about" element={<Navigate to="/en#about" replace />} />
-              <Route path="contact" element={<Navigate to="/en#contact" replace />} />
-              <Route path="*" element={<NotFoundPage />} />
-            </Route>
-
-            <Route path="/admin/login" element={<AdminLoginPage />} />
-            <Route path="/admin/reset" element={<AdminResetPage />} />
-            <Route path="/admin" element={<AdminOverviewPage />} />
-            <Route path="/admin/trips" element={<AdminTripsListPage />} />
-            <Route path="/admin/trips/new" element={<AdminTripFormPage />} />
-            <Route path="/admin/trips/:id" element={<AdminTripFormPage />} />
-            <Route path="/admin/destinations" element={<AdminDestinationsPage />} />
-            <Route path="/admin/gallery" element={<AdminGalleryPage />} />
-            <Route path="/admin/home" element={<AdminHomePage />} />
-            <Route path="/admin/settings" element={<AdminSettingsPage />} />
-            <Route path="/admin/account" element={<AdminAccountPage />} />
-
+          <Route path="/ar" element={<LocaleShell locale="ar" />}>
+            <Route index element={<HomePage />} />
+            <Route path="trips" element={<Navigate to="/ar#trips" replace />} />
             <Route
-              path="*"
+              path="trips/:slug"
               element={
-                <I18nProvider locale="ar">
-                  <NotFoundPage />
-                </I18nProvider>
+                <Suspense fallback={<TripDetailSkeleton />}>
+                  <TripDetailPage />
+                </Suspense>
               }
             />
-          </Routes>
-        </AdminAuthProvider>
+            <Route path="gallery" element={<Navigate to="/ar#gallery" replace />} />
+            <Route path="about" element={<Navigate to="/ar#about" replace />} />
+            <Route path="contact" element={<Navigate to="/ar#contact" replace />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Route>
+
+          <Route path="/en" element={<LocaleShell locale="en" />}>
+            <Route index element={<HomePage />} />
+            <Route path="trips" element={<Navigate to="/en#trips" replace />} />
+            <Route
+              path="trips/:slug"
+              element={
+                <Suspense fallback={<TripDetailSkeleton />}>
+                  <TripDetailPage />
+                </Suspense>
+              }
+            />
+            <Route path="gallery" element={<Navigate to="/en#gallery" replace />} />
+            <Route path="about" element={<Navigate to="/en#about" replace />} />
+            <Route path="contact" element={<Navigate to="/en#contact" replace />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Route>
+
+          <Route
+            path="/admin/*"
+            element={
+              <Suspense fallback={<AdminShellSkeleton />}>
+                <AdminApp />
+              </Suspense>
+            }
+          />
+
+          <Route
+            path="*"
+            element={
+              <I18nProvider locale="ar">
+                <NotFoundPage />
+              </I18nProvider>
+            }
+          />
+        </Routes>
       </PublicDataProvider>
     </BrowserRouter>
   );

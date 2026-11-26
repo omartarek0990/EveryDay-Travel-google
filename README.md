@@ -120,3 +120,9 @@ Add these environment variables in **Vercel → Project → Settings → Environ
 
 `vercel.json` now runs `npm run build && npm run build:api`, so `api/index.js` is regenerated from `server/vercel-entry.ts` on every deploy. Content and uploads are no longer written to the ephemeral filesystem.
 
+## Caching
+
+- `GET /api/public/site` is cached at the CDN for 60 seconds (`s-maxage=60, stale-while-revalidate=600`), so owner edits can take up to about a minute to appear on the public site. The dashboard itself always shows the saved change immediately: the admin refresh requests `/api/public/site?fresh=1`, which the server answers with `Cache-Control: no-store`.
+- `/api/auth/*`, `/api/admin/*` and `/api/uploads/*` are always `no-store`.
+- Hashed build assets (`/assets/*`), fonts (`/fonts/*`) and local uploads (`/uploads/*`) are immutable for a year; bundled seed images under `/assets/img/*` (whose names are not content-hashed) use `max-age=604800, stale-while-revalidate=86400`.
+

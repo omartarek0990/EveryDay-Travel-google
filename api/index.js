@@ -3,6 +3,27 @@ import "dotenv/config";
 import "express-async-errors";
 import express2 from "express";
 
+// server/cache-headers.ts
+var PUBLIC_CACHE_CONTROL = "public, s-maxage=60, stale-while-revalidate=600";
+var NO_STORE = "no-store";
+function cacheControlForRequest(path3, query = {}) {
+  const fresh = query.fresh === "1" || query.fresh === 1;
+  if (path3.startsWith("/api/public/")) {
+    return fresh ? NO_STORE : PUBLIC_CACHE_CONTROL;
+  }
+  if (path3.startsWith("/api/auth/") || path3.startsWith("/api/admin/") || path3.startsWith("/api/uploads/")) {
+    return NO_STORE;
+  }
+  return null;
+}
+function applyApiCacheHeaders(req, res, next) {
+  const value = cacheControlForRequest(req.path, req.query);
+  if (value) {
+    res.setHeader("Cache-Control", value);
+  }
+  next();
+}
+
 // server/supabase.ts
 import { createClient } from "@supabase/supabase-js";
 var client = null;
@@ -3127,6 +3148,7 @@ function createApp() {
   } catch (err) {
     console.warn("Skipping local uploads static directory:", err);
   }
+  app2.use(applyApiCacheHeaders);
   app2.use("/api", createApiRouter());
   app2.use((err, req, res, next) => {
     if (res.headersSent) {
@@ -3136,6 +3158,7 @@ function createApp() {
     console.error("[server] Unhandled request error:", err);
     const message = err instanceof Error ? err.message : "Unexpected server error";
     if (req.path.startsWith("/api")) {
+      res.setHeader("Cache-Control", "no-store");
       res.status(500).json({ error: "\u062D\u062F\u062B \u062E\u0637\u0623 \u0641\u064A \u0627\u0644\u062E\u0627\u062F\u0645. \u062D\u0627\u0648\u0644 \u0645\u0631\u0629 \u0623\u062E\u0631\u0649.", detail: message });
     } else {
       res.status(500).type("text/plain").send("Internal Server Error");
