@@ -122,7 +122,9 @@ Add these environment variables in **Vercel → Project → Settings → Environ
 
 ## Caching
 
-- `GET /api/public/site` is cached at the CDN for 60 seconds (`s-maxage=60, stale-while-revalidate=600`), so owner edits can take up to about a minute to appear on the public site. The dashboard itself always shows the saved change immediately: the admin refresh requests `/api/public/site?fresh=1`, which the server answers with `Cache-Control: no-store`.
+- Public pages (`/ar`, `/en`, trip URLs) are rendered by the serverless function, which injects the slim payload, the per-route meta tags and the hero preload into the built shell. The HTML is edge-cached for 60 seconds (`s-maxage=60, stale-while-revalidate=600`).
+- `GET /api/public/landing` (and `/api/public/trips/:slug`, `/api/public/gallery`) share the same 60-second edge cache, so owner edits can take up to about a minute to appear on the public site. The dashboard itself always shows the saved change immediately: the admin refresh requests `/api/public/landing?fresh=1`, which the server answers with `Cache-Control: no-store`.
+- `GET /api/public/site` (the full payload from parts 1–2) is still served for compatibility and cached the same way.
 - `/api/auth/*`, `/api/admin/*` and `/api/uploads/*` are always `no-store`.
 - Hashed build assets (`/assets/*`), fonts (`/fonts/*`) and local uploads (`/uploads/*`) are immutable for a year; bundled seed images under `/assets/img/*` (whose names are not content-hashed) use `max-age=604800, stale-while-revalidate=86400`.
 
