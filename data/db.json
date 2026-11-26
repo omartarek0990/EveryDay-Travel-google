@@ -25,100 +25,190 @@
       "id": "img-hero-dahab",
       "provider": "STATIC",
       "publicId": "seed/hero_dahab_redsea",
-      "url": "/src/assets/images/hero_dahab_redsea_1795599272813.jpg",
-      "width": 1408,
+      "url": "/assets/img/hero_dahab_redsea_1795599272813-w1200.webp",
+      "width": 1376,
       "height": 768,
-      "bytes": 280000,
-      "format": "jpg",
-      "createdAt": "2026-11-25T13:08:34.994Z"
+      "bytes": 221002,
+      "format": "webp",
+      "createdAt": "2026-11-25T13:08:34.994Z",
+      "variants": {
+        "format": "webp",
+        "widths": [
+          480,
+          768,
+          1200
+        ],
+        "basePath": "assets/img/hero_dahab_redsea_1795599272813"
+      },
+      "avgColor": "#9d9787"
     },
     {
       "id": "img-hero-siwa",
       "provider": "STATIC",
       "publicId": "seed/hero_siwa_oasis",
-      "url": "/src/assets/images/hero_siwa_oasis_1795599273206.jpg",
-      "width": 1408,
+      "url": "/assets/img/hero_siwa_oasis_1795599273206-w1200.webp",
+      "width": 1376,
       "height": 768,
-      "bytes": 295000,
-      "format": "jpg",
-      "createdAt": "2026-11-25T13:08:34.994Z"
+      "bytes": 153296,
+      "format": "webp",
+      "createdAt": "2026-11-25T13:08:34.994Z",
+      "variants": {
+        "format": "webp",
+        "widths": [
+          480,
+          768,
+          1200
+        ],
+        "basePath": "assets/img/hero_siwa_oasis_1795599273206"
+      },
+      "avgColor": "#987d5d"
     },
     {
       "id": "img-trip-dahab",
       "provider": "STATIC",
       "publicId": "seed/trip_dahab_snorkeling",
-      "url": "/src/assets/images/trip_dahab_snorkeling_1795599274928.jpg",
-      "width": 1280,
-      "height": 960,
-      "bytes": 260000,
-      "format": "jpg",
-      "createdAt": "2026-11-25T13:08:34.994Z"
+      "url": "/assets/img/trip_dahab_snorkeling_1795599274928-w1200.webp",
+      "width": 1200,
+      "height": 896,
+      "bytes": 378218,
+      "format": "webp",
+      "createdAt": "2026-11-25T13:08:34.994Z",
+      "variants": {
+        "format": "webp",
+        "widths": [
+          480,
+          768,
+          1200
+        ],
+        "basePath": "assets/img/trip_dahab_snorkeling_1795599274928"
+      },
+      "avgColor": "#80928a"
     },
     {
       "id": "img-trip-siwa",
       "provider": "STATIC",
       "publicId": "seed/trip_siwa_safari",
-      "url": "/src/assets/images/trip_siwa_safari_1795599273291.jpg",
-      "width": 1280,
-      "height": 960,
-      "bytes": 250000,
-      "format": "jpg",
-      "createdAt": "2026-11-25T13:08:34.994Z"
+      "url": "/assets/img/trip_siwa_safari_1795599273291-w1200.webp",
+      "width": 1200,
+      "height": 896,
+      "bytes": 221900,
+      "format": "webp",
+      "createdAt": "2026-11-25T13:08:34.994Z",
+      "variants": {
+        "format": "webp",
+        "widths": [
+          480,
+          768,
+          1200
+        ],
+        "basePath": "assets/img/trip_siwa_safari_1795599273291"
+      },
+      "avgColor": "#a07547"
     },
     {
       "id": "img-trip-alex",
       "provider": "STATIC",
       "publicId": "seed/trip_alexandria_corniche",
-      "url": "/src/assets/images/trip_alexandria_corniche_1795599275506.jpg",
-      "width": 1280,
-      "height": 960,
-      "bytes": 245000,
-      "format": "jpg",
-      "createdAt": "2026-11-25T13:08:34.994Z"
+      "url": "/assets/img/trip_alexandria_corniche_1795599275506-w1200.webp",
+      "width": 1200,
+      "height": 896,
+      "bytes": 299936,
+      "format": "webp",
+      "createdAt": "2026-11-25T13:08:34.994Z",
+      "variants": {
+        "format": "webp",
+        "widths": [
+          480,
+          768,
+          1200
+        ],
+        "basePath": "assets/img/trip_alexandria_corniche_1795599275506"
+      },
+      "avgColor": "#9c9c94"
     },
     {
       "id": "img-gallery-nuweiba",
       "provider": "STATIC",
       "publicId": "seed/gallery_nuweiba_camp",
-      "url": "/src/assets/images/gallery_nuweiba_camp_1795599275538.jpg",
-      "width": 1280,
-      "height": 960,
-      "bytes": 240000,
-      "format": "jpg",
-      "createdAt": "2026-11-25T13:08:34.994Z"
+      "url": "/assets/img/gallery_nuweiba_camp_1795599275538-w1200.webp",
+      "width": 1200,
+      "height": 896,
+      "bytes": 253030,
+      "format": "webp",
+      "createdAt": "2026-11-25T13:08:34.994Z",
+      "variants": {
+        "format": "webp",
+        "widths": [
+          480,
+          768,
+          1200
+        ],
+        "basePath": "assets/img/gallery_nuweiba_camp_1795599275538"
+      },
+      "avgColor": "#5b483f"
     },
     {
       "id": "img-hero-catherine",
       "provider": "STATIC",
       "publicId": "seed/hero_saint_catherine_snow",
-      "url": "/src/assets/images/hero_saint_catherine_snow_1795616932524.jpg",
-      "width": 1408,
+      "url": "/assets/img/hero_saint_catherine_snow_1795616932524-w1200.webp",
+      "width": 1376,
       "height": 768,
-      "bytes": 310000,
-      "format": "jpg",
-      "createdAt": "2026-11-25T14:29:00.000Z"
+      "bytes": 320184,
+      "format": "webp",
+      "createdAt": "2026-11-25T14:29:00.000Z",
+      "variants": {
+        "format": "webp",
+        "widths": [
+          480,
+          768,
+          1200
+        ],
+        "basePath": "assets/img/hero_saint_catherine_snow_1795616932524"
+      },
+      "avgColor": "#89858a"
     },
     {
       "id": "img-hero-siwa-4x4",
       "provider": "STATIC",
       "publicId": "seed/hero_siwa_4x4",
-      "url": "/src/assets/images/hero_siwa_4x4_1795616932838.jpg",
-      "width": 1408,
+      "url": "/assets/img/hero_siwa_4x4_1795616932838-w1200.webp",
+      "width": 1376,
       "height": 768,
-      "bytes": 295000,
-      "format": "jpg",
-      "createdAt": "2026-11-25T14:29:00.000Z"
+      "bytes": 105196,
+      "format": "webp",
+      "createdAt": "2026-11-25T14:29:00.000Z",
+      "variants": {
+        "format": "webp",
+        "widths": [
+          480,
+          768,
+          1200
+        ],
+        "basePath": "assets/img/hero_siwa_4x4_1795616932838"
+      },
+      "avgColor": "#965e2d"
     },
     {
       "id": "img-hero-farsha",
       "provider": "STATIC",
       "publicId": "seed/hero_farsha_sharm",
-      "url": "/src/assets/images/hero_farsha_sharm_1795616934669.jpg",
-      "width": 1408,
+      "url": "/assets/img/hero_farsha_sharm_1795616934669-w1200.webp",
+      "width": 1376,
       "height": 768,
-      "bytes": 320000,
-      "format": "jpg",
-      "createdAt": "2026-11-25T14:29:00.000Z"
+      "bytes": 222090,
+      "format": "webp",
+      "createdAt": "2026-11-25T14:29:00.000Z",
+      "variants": {
+        "format": "webp",
+        "widths": [
+          480,
+          768,
+          1200
+        ],
+        "basePath": "assets/img/hero_farsha_sharm_1795616934669"
+      },
+      "avgColor": "#504042"
     }
   ],
   "siteSettings": {

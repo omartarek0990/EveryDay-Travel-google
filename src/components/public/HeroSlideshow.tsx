@@ -1,8 +1,23 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Check, MapPin } from 'lucide-react';
 import { useI18n } from '../I18nProvider';
 import type { HeroImageRecord, SiteSettings } from '../../shared/types';
 import { ResilientImage } from '../ResilientImage';
+import { imageProps } from '../../lib/image-url';
+
+/** Runs `callback` when the browser is idle, with a timeout for busy devices. */
+function onIdle(callback: () => void): () => void {
+  const idleWindow = window as unknown as {
+    requestIdleCallback?: (cb: () => void, options?: { timeout: number }) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
+  if (idleWindow.requestIdleCallback) {
+    const handle = idleWindow.requestIdleCallback(callback, { timeout: 2000 });
+    return () => idleWindow.cancelIdleCallback?.(handle);
+  }
+  const handle = window.setTimeout(callback, 300);
+  return () => window.clearTimeout(handle);
+}
 
 export function HeroSlideshow({
   settings,
@@ -17,6 +32,8 @@ export function HeroSlideshow({
   const [transitionMode, setTransitionMode] = useState<'fade' | 'slide'>('fade');
   const [slideStage, setSlideStage] = useState<'enter' | 'active'>('active');
   const [reducedMotion, setReducedMotion] = useState(false);
+  const [firstImageLoaded, setFirstImageLoaded] = useState(false);
+  const preloadedIdsRef = useRef<Set<string>>(new Set());
 
   const count = heroImages.length;
 
@@ -28,15 +45,31 @@ export function HeroSlideshow({
     return () => mq.removeEventListener('change', update);
   }, []);
 
-  // Preload only the next image
+  // Keep the outgoing image mounted only for the length of the transition.
   useEffect(() => {
-    if (count <= 1) return;
-    const nextUrl = heroImages[(activeIdx + 1) % count]?.image?.url;
-    if (nextUrl) {
-      const img = new Image();
-      img.src = nextUrl;
-    }
-  }, [activeIdx, count, heroImages]);
+    if (prevIdx === null) return;
+    const timer = window.setTimeout(() => setPrevIdx(null), reducedMotion ? 200 : 750);
+    return () => window.clearTimeout(timer);
+  }, [prevIdx, reducedMotion]);
+
+  // Warm the next slide only after the first one has loaded, and only when idle.
+  useEffect(() => {
+    if (!firstImageLoaded || count <= 1) return;
+    const nextImage = heroImages[(activeIdx + 1) % count]?.image;
+    if (!nextImage || preloadedIdsRef.current.has(nextImage.id)) return;
+
+    return onIdle(() => {
+      preloadedIdsRef.current.add(nextImage.id);
+      // Match the variant the browser would pick for the current viewport.
+      const maxWidth = window.innerWidth < 768 ? 768 : 1200;
+      const url = imageProps(nextImage, { maxWidth }).src;
+      if (url) {
+        const preload = new Image();
+        preload.decoding = 'async';
+        preload.src = url;
+      }
+    });
+  }, [firstImageLoaded, activeIdx, count, heroImages]);
 
   // Single interval for slideshow; pauses when tab is hidden; disabled if 1 image
   useEffect(() => {
@@ -91,9 +124,11 @@ export function HeroSlideshow({
         {prevImage && count > 1 && (
           <ResilientImage
             key={`prev-${prevImage.id}`}
-            src={prevImage.url}
+            image={prevImage}
             alt={heroTitle.text}
             loading="eager"
+            sizes="100vw"
+            maxWidth={2000}
             className="absolute inset-0 w-full h-full object-cover"
           />
         )}
@@ -111,10 +146,15 @@ export function HeroSlideshow({
             }`}
           >
             <ResilientImage
-              src={activeImage.url}
+              image={activeImage}
               alt={heroTitle.text}
-              loading="eager"
-              fetchPriority="high"
+              loading={activeIdx === 0 ? 'eager' : 'lazy'}
+              fetchPriority={activeIdx === 0 ? 'high' : 'auto'}
+              sizes="100vw"
+              maxWidth={2000}
+              onLoad={() => {
+                if (activeIdx === 0) setFirstImageLoaded(true);
+              }}
               className="w-full h-full object-cover"
             />
           </div>

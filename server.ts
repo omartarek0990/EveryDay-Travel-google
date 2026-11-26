@@ -28,6 +28,11 @@ async function startServer() {
     if (fs.existsSync(distAssets)) {
       app.use('/src/assets', express.static(distAssets, { maxAge: '30d' }));
     }
+    // Hashed JS/CSS chunks and content-unique image variants can be cached forever.
+    const distAssetsDir = path.join(distDir, 'assets');
+    if (fs.existsSync(distAssetsDir)) {
+      app.use('/assets', express.static(distAssetsDir, { maxAge: '365d', immutable: true }));
+    }
     app.use(express.static(distDir, { index: false }));
     app.get('*', (_req, res) => {
       res.sendFile(path.join(distDir, 'index.html'));

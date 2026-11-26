@@ -226,9 +226,13 @@ export function AboutPage() {
       {/* Full-bleed warm brand-themed 4-pillar service highlights banner */}
       <section className="relative overflow-hidden bg-ink text-white py-14 sm:py-16 border-y border-brand-600/25">
         <img
-          src="/src/assets/images/hero_dahab_redsea_1795599272813.jpg"
+          src="/assets/img/hero_dahab_redsea_1795599272813-w1200.webp"
           alt=""
           aria-hidden="true"
+          width={1376}
+          height={768}
+          loading="lazy"
+          decoding="async"
           referrerPolicy="no-referrer"
           className="absolute inset-0 w-full h-full object-cover opacity-35"
         />

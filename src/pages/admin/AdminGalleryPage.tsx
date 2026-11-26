@@ -55,7 +55,13 @@ function SortableGalleryTile({
       className="rounded-2xl bg-surface border border-border overflow-hidden flex flex-col"
     >
       <div className="relative aspect-[4/3] bg-surface-alt">
-        <ResilientImage src={item.image?.url} alt={caption.ar || ''} className="w-full h-full object-cover" />
+        <ResilientImage
+          image={item.image}
+          alt={caption.ar || ''}
+          sizes="(min-width: 1024px) 25vw, 50vw"
+          maxWidth={768}
+          className="w-full h-full object-cover"
+        />
         <button
           type="button"
           {...attributes}

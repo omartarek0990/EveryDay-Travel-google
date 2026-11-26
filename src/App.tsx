@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'rea
 import { I18nProvider } from './components/I18nProvider';
 import { PublicDataProvider, usePublicData } from './components/PublicDataContext';
 import { AdminAuthProvider } from './components/admin/AdminAuthContext';
+import { imageProps } from './lib/image-url';
 import type { Locale } from './shared/types';
 import { HomePage } from './pages/public/HomePage';
 import { NotFoundPage } from './pages/public/NotFoundPage';
@@ -31,7 +32,8 @@ function ScrollToTop() {
 function FaviconSync() {
   const { data } = usePublicData();
   useEffect(() => {
-    const url = data?.settings.faviconImage?.url;
+    const image = data?.settings.faviconImage;
+    const url = image ? imageProps(image, { maxWidth: 480 }).src : null;
     if (!url) return;
     let link = document.head.querySelector<HTMLLinkElement>('link[rel="icon"]');
     if (!link) {
@@ -40,7 +42,7 @@ function FaviconSync() {
       document.head.appendChild(link);
     }
     link.href = url;
-  }, [data?.settings.faviconImage?.url]);
+  }, [data?.settings.faviconImage]);
   return null;
 }
 

@@ -65,6 +65,8 @@ Bilingual (Arabic RTL default + English LTR) showcase website and Arabic RTL own
 - `npm run db:import` — Import the legacy `data/db.json` content and owner accounts into Supabase
 - `npm run create-owner` — Create an owner account interactively or via `--username <name> --password <pass>`
 - `npm run reset-password -- --username <name>` — Generate a one-time temporary password, set `mustChangePassword`, and revoke active sessions
+- `npm run snapshot:db` — Read-only row counts + image ids/urls into `docs/snapshots/` (no content, no secrets)
+- `npm run optimize:images -- --seed-only|--supabase [--dry-run] [--prune]` — Local-only WebP variant generator for bundled seed photos and existing Supabase rows (see `docs/PERFORMANCE.md`)
 
 ## Supabase Architecture
 

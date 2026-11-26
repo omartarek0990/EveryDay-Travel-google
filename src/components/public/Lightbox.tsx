@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { useI18n } from '../I18nProvider';
+import type { ImageRecord } from '../../shared/types';
 import { ResilientImage } from '../ResilientImage';
 
 export interface LightboxItem {
@@ -8,6 +9,8 @@ export interface LightboxItem {
   alt: string;
   caption?: string;
   captionIsFallbackAr?: boolean;
+  /** Full image record, so the largest variant can be requested. */
+  image?: ImageRecord | null;
 }
 
 export function Lightbox({
@@ -96,9 +99,12 @@ export function Lightbox({
 
         <div className="max-h-[75vh] w-full flex items-center justify-center">
           <ResilientImage
+            image={current.image}
             src={current.url}
             alt={current.alt}
             loading="eager"
+            sizes="100vw"
+            maxWidth={2000}
             className="max-h-[75vh] max-w-full w-auto h-auto object-contain rounded-xl"
           />
         </div>

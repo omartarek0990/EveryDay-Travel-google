@@ -76,7 +76,14 @@ function SortableTripRow({
         </button>
 
         <div className="w-20 aspect-[4/3] rounded-xl overflow-hidden bg-surface-alt shrink-0 border border-border">
-          <ResilientImage src={cover} alt={trip.title.ar} className="w-full h-full object-cover" />
+          <ResilientImage
+            image={trip.images[0]?.image ?? undefined}
+            src={cover}
+            alt={trip.title.ar}
+            sizes="80px"
+            maxWidth={480}
+            className="w-full h-full object-cover"
+          />
         </div>
 
         <div className="min-w-0">

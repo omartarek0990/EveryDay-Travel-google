@@ -1,5 +1,6 @@
 import React from 'react';
 import type { ImageRecord } from '../shared/types';
+import { imageProps } from '../lib/image-url';
 
 export function BrandLogo({
   logoImage,
@@ -10,10 +11,16 @@ export function BrandLogo({
 }) {
   if (logoImage?.url) {
     const heightClass = size === 'sm' ? 'h-9' : size === 'lg' ? 'h-14' : 'h-12';
+    const logoProps = imageProps(logoImage, { sizes: '160px', maxWidth: 240 });
     return (
       <img
-        src={logoImage.url}
+        src={logoProps.src ?? logoImage.url}
+        srcSet={logoProps.srcSet}
+        sizes={logoProps.sizes}
+        width={logoProps.width}
+        height={logoProps.height}
         alt="everyDay Travel Agency"
+        decoding="async"
         className={`${heightClass} w-auto object-contain select-none`}
         referrerPolicy="no-referrer"
       />
