@@ -3,9 +3,12 @@ import { Link } from 'react-router-dom';
 import { useI18n } from '../../components/I18nProvider';
 import { PublicLayout } from '../../components/public/PublicLayout';
 import { SeoHead } from '../../components/public/SeoHead';
+import { useHideAppLoader } from '../../lib/appLoader';
 
 export function NotFoundPage() {
   const { locale, messages } = useI18n();
+  // This page needs no data, so it is ready as soon as it renders.
+  useHideAppLoader();
 
   return (
     <PublicLayout>

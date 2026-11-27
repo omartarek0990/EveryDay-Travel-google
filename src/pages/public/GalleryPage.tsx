@@ -5,11 +5,15 @@ import { Lightbox, type LightboxItem } from '../../components/public/Lightbox';
 import { PublicLayout } from '../../components/public/PublicLayout';
 import { SeoHead } from '../../components/public/SeoHead';
 import { ResilientImage } from '../../components/ResilientImage';
+import { useHideAppLoader } from '../../lib/appLoader';
 
 export function GalleryPage() {
   const { messages, t } = useI18n();
   const { data, loading } = usePublicData();
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
+
+  // Loader: released once the gallery data has loaded (or failed).
+  useHideAppLoader(!loading);
 
   if (loading || !data) {
     return (

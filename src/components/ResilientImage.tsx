@@ -16,6 +16,8 @@ export function ResilientImage({
   width,
   height,
   onLoad,
+  onError,
+  imgRef,
 }: {
   /** Image row with optional responsive variants. Preferred over `src`. */
   image?: ImageRecord | null;
@@ -30,7 +32,10 @@ export function ResilientImage({
   maxWidth?: number;
   width?: number;
   height?: number;
-  onLoad?: () => void;
+  onLoad?: React.ReactEventHandler<HTMLImageElement>;
+  /** Called before the built-in failure fallback replaces the image. */
+  onError?: React.ReactEventHandler<HTMLImageElement>;
+  imgRef?: React.Ref<HTMLImageElement>;
 }) {
   const [failed, setFailed] = useState(false);
 
@@ -60,6 +65,7 @@ export function ResilientImage({
 
   return (
     <img
+      ref={imgRef}
       src={resolved.src}
       srcSet={resolved.srcSet}
       sizes={resolved.sizes}
@@ -71,7 +77,10 @@ export function ResilientImage({
       decoding="async"
       referrerPolicy="no-referrer"
       onLoad={onLoad}
-      onError={() => setFailed(true)}
+      onError={(event) => {
+        onError?.(event);
+        setFailed(true);
+      }}
       style={
         resolved.backgroundColor ? { backgroundColor: resolved.backgroundColor } : undefined
       }

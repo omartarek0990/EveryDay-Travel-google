@@ -17,6 +17,7 @@ import {
   formatWesternNumber,
 } from '../../shared/format';
 import type { TripWithRelations } from '../../shared/types';
+import { useHideAppLoader } from '../../lib/appLoader';
 import { NotFoundPage } from './NotFoundPage';
 
 export function TripDetailPage() {
@@ -72,6 +73,9 @@ export function TripDetailPage() {
       .filter((tr) => tr.id !== trip.id && tr.destination?.slug === destinationSlug)
       .slice(0, 3);
   }, [data, trip]);
+
+  // Loader: released once the trip content is ready (or definitively missing).
+  useHideAppLoader(!loading && Boolean(data) && tripStatus !== 'loading');
 
   if (loading || !data || tripStatus === 'loading') {
     return (

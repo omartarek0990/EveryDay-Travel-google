@@ -12,6 +12,7 @@ import { TripCard } from '../../components/public/TripCard';
 import { WhatsAppIcon } from '../../components/public/WhatsAppIcon';
 import { buildWhatsAppUrl, isSafeExternalHttpsUrl } from '../../shared/format';
 import { prefetchTripDetail } from '../../lib/prefetch';
+import { useHideAppLoader } from '../../lib/appLoader';
 
 const TRIPS_PAGE_SIZE = 12;
 
@@ -21,6 +22,12 @@ export function HomePage() {
   const location = useLocation();
   const [selectedDestSlug, setSelectedDestSlug] = useState<string>('all');
   const [visibleTripsCount, setVisibleTripsCount] = useState<number>(TRIPS_PAGE_SIZE);
+
+  // The loader normally hides on the first hero image (see HeroSlideshow). When
+  // there is no hero to wait for — data failed, or the owner has no hero images —
+  // release it as soon as loading is finished.
+  const hasHeroImage = Boolean(data && data.heroImages.length > 0);
+  useHideAppLoader(!loading && !hasHeroImage);
 
   // Warm the trip detail chunk once the landing page is idle.
   useEffect(() => {

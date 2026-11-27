@@ -4,6 +4,7 @@ import { I18nProvider } from './components/I18nProvider';
 import { PublicDataProvider, usePublicData } from './components/PublicDataContext';
 import { AdminShellSkeleton, TripDetailSkeleton } from './components/public/PageSkeletons';
 import { imageProps } from './lib/image-url';
+import { useHideAppLoader } from './lib/appLoader';
 import type { Locale } from './shared/types';
 import { HomePage } from './pages/public/HomePage';
 import { NotFoundPage } from './pages/public/NotFoundPage';
@@ -80,6 +81,8 @@ function LocaleShell({ locale }: { locale: Locale }) {
 }
 
 function RootRedirect() {
+  // No content of its own: the loader must not wait for a hero that never renders here.
+  useHideAppLoader();
   const prefersEnglish =
     typeof navigator !== 'undefined' &&
     navigator.language?.toLowerCase().startsWith('en');

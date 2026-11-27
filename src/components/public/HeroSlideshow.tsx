@@ -4,6 +4,7 @@ import { useI18n } from '../I18nProvider';
 import type { HeroImageRecord, SiteSettings } from '../../shared/types';
 import { ResilientImage } from '../ResilientImage';
 import { imageProps } from '../../lib/image-url';
+import { hideAppLoader } from '../../lib/appLoader';
 
 /** Runs `callback` when the browser is idle, with a timeout for busy devices. */
 function onIdle(callback: () => void): () => void {
@@ -34,8 +35,47 @@ export function HeroSlideshow({
   const [reducedMotion, setReducedMotion] = useState(false);
   const [firstImageLoaded, setFirstImageLoaded] = useState(false);
   const preloadedIdsRef = useRef<Set<string>>(new Set());
+  const firstSlideImgRef = useRef<HTMLImageElement | null>(null);
+  const loaderHiddenRef = useRef(false);
 
   const count = heroImages.length;
+
+  /**
+   * Hides the first-load loader once the eager hero image is actually painted:
+   * decode() first (downloaded ≠ painted), then web fonts. The 3 s failsafe in
+   * index.html covers a decode/fonts promise that never settles.
+   */
+  const hideLoaderWhenPainted = (img?: HTMLImageElement | null) => {
+    if (loaderHiddenRef.current) return;
+    loaderHiddenRef.current = true;
+    const decoded = img && typeof img.decode === 'function' ? img.decode().catch(() => {}) : Promise.resolve();
+    void decoded.then(() => {
+      const fonts = typeof document !== 'undefined' ? document.fonts : undefined;
+      if (fonts && typeof fonts.ready?.then === 'function') {
+        fonts.ready.then(
+          () => hideAppLoader(),
+          () => hideAppLoader()
+        );
+        return;
+      }
+      hideAppLoader();
+    });
+  };
+
+  // Cached reload: the image can already be complete before any load event fires.
+  useEffect(() => {
+    const img = firstSlideImgRef.current;
+    if (!img || !img.complete) return;
+    if (img.naturalWidth === 0) {
+      // Broken cached image: the loader must not stay up for this.
+      if (!loaderHiddenRef.current) {
+        loaderHiddenRef.current = true;
+        hideAppLoader();
+      }
+      return;
+    }
+    hideLoaderWhenPainted(img);
+  }, [heroImages[0]?.image?.id]);
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -148,12 +188,21 @@ export function HeroSlideshow({
             <ResilientImage
               image={activeImage}
               alt={heroTitle.text}
+              imgRef={activeIdx === 0 ? firstSlideImgRef : undefined}
               loading={activeIdx === 0 ? 'eager' : 'lazy'}
               fetchPriority={activeIdx === 0 ? 'high' : 'auto'}
               sizes="100vw"
               maxWidth={2000}
-              onLoad={() => {
-                if (activeIdx === 0) setFirstImageLoaded(true);
+              onLoad={(event) => {
+                if (activeIdx !== 0) return;
+                setFirstImageLoaded(true);
+                hideLoaderWhenPainted(event.currentTarget);
+              }}
+              onError={() => {
+                // Broken hero image: never leave the loader covering the page.
+                if (loaderHiddenRef.current) return;
+                loaderHiddenRef.current = true;
+                hideAppLoader();
               }}
               className="w-full h-full object-cover"
             />
