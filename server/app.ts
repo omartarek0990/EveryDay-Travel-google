@@ -148,19 +148,48 @@ export function createApp() {
       next(err);
       return;
     }
-    console.error('[server] Unhandled request error:', err);
-    const message = err instanceof Error ? err.message : 'Unexpected server error';
+    const status = apiErrorStatus(err);
+    // Client mistakes (oversized body, bad JSON) must not look like server crashes.
+    if (status >= 500) {
+      console.error('[server] Unhandled request error:', err);
+    } else {
+      console.warn(`[server] Rejected request (${status}) on ${req.method} ${req.path}`);
+    }
 
     if (req.path.startsWith('/api')) {
-      // Never let the CDN cache an error response.
+      // Never let the CDN cache an error response, and never leak internals.
       res.setHeader('Cache-Control', 'no-store');
-      res.status(500).json({ error: 'حدث خطأ في الخادم. حاول مرة أخرى.', detail: message });
+      res.status(status).json({ error: apiErrorMessage(status) });
     } else {
-      res.status(500).type('text/plain').send('Internal Server Error');
+      res.status(status).type('text/plain').send(status >= 500 ? 'Internal Server Error' : 'Bad Request');
     }
   });
 
   return app;
+}
+
+/**
+ * HTTP status to answer with. Body-parser and other Express middleware put the
+ * intended status on the error (`status` / `statusCode`); anything else is a
+ * genuine 500.
+ */
+export function apiErrorStatus(err: unknown): number {
+  const source = err as { status?: unknown; statusCode?: unknown } | null;
+  const raw = source?.status ?? source?.statusCode;
+  const value = typeof raw === 'number' ? raw : Number(raw);
+  if (!Number.isInteger(value) || value < 400 || value > 599) return 500;
+  return value;
+}
+
+/** Arabic, user-facing message. Never contains internal detail. */
+export function apiErrorMessage(status: number): string {
+  if (status === 413) return 'حجم البيانات المرسلة أكبر من المسموح.';
+  if (status === 400) return 'بيانات غير صالحة.';
+  if (status === 401) return 'غير مصرح. يرجى تسجيل الدخول.';
+  if (status === 403) return 'غير مسموح بهذا الطلب.';
+  if (status === 404) return 'العنصر المطلوب غير موجود.';
+  if (status === 429) return 'طلبات كثيرة جداً. حاول بعد قليل.';
+  return 'حدث خطأ في الخادم. حاول مرة أخرى.';
 }
 
 function isHtmlRoute(path: string): boolean {
