@@ -9,3 +9,8 @@ coverage/
 .vercel
 
 .lighthouseci/
+
+# local-only: secrets, manual SQL for Omar, audit artifacts
+backups/
+supabase-manual/
+.audit/
