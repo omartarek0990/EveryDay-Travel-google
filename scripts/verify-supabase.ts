@@ -210,6 +210,8 @@ async function checkImages(): Promise<void> {
   let variantMisses = 0;
   let weakCache = 0;
   let withoutVariants = 0;
+  let variantsChecked = 0;
+  let variantsSkipped = 0;
 
   for (const image of images) {
     if (!image.variants) {
@@ -225,7 +227,20 @@ async function checkImages(): Promise<void> {
       .map((entry) => entry.split(' ')[0]);
     if (urls.length === 0 && props.src) urls.push(props.src);
     for (const url of urls) {
-      const absolute = url.startsWith('http') ? url : `${getSupabaseUrl() ?? ''}${url}`;
+      // Bundled (STATIC) variants are served by the site, Supabase-hosted ones by
+      // the storage domain. A relative URL therefore needs --site-url, not SUPABASE_URL.
+      const absolute = url.startsWith('http')
+        ? url
+        : siteUrl
+          ? `${siteUrl}${url}`
+          : image.provider === 'SUPABASE'
+            ? `${getSupabaseUrl() ?? ''}${url}`
+            : null;
+      if (!absolute) {
+        variantsSkipped += 1;
+        continue;
+      }
+      variantsChecked += 1;
       try {
         const res = await http(absolute, { method: 'HEAD' });
         const type = res.headers.get('content-type') ?? '';
@@ -233,7 +248,9 @@ async function checkImages(): Promise<void> {
         const maxAge = Number(/max-age=(\d+)/.exec(cache)?.[1] ?? 0);
         if (!res.ok || !type.startsWith('image/')) {
           variantMisses += 1;
-        } else if (maxAge < 31536000) {
+        } else if (image.provider === 'SUPABASE' ? maxAge < 31536000 : maxAge < 604800) {
+          // Storage uploads are content-unique (1 year). Bundled seed files are not
+          // content-hashed, so the documented policy for them is 7 days.
           weakCache += 1;
         }
       } catch {
@@ -246,12 +263,13 @@ async function checkImages(): Promise<void> {
   record(
     variantMisses === 0 ? 'PASS' : 'FAIL',
     'variant urls answer 200 with image type',
-    `${variantMisses} misses`
+    `${variantMisses} misses of ${variantsChecked} checked` +
+      (variantsSkipped > 0 ? ` (${variantsSkipped} skipped: relative urls need --site-url)` : '')
   );
   record(
     weakCache === 0 ? 'PASS' : 'WARN',
-    'variant cache-control max-age >= 31536000',
-    weakCache === 0 ? 'all long-lived' : `${weakCache} below a year`
+    'variant cache-control policy',
+    weakCache === 0 ? 'storage: 1 year, bundled: >= 7 days' : `${weakCache} below policy`
   );
   record(
     withoutVariants === 0 ? 'PASS' : 'WARN',
