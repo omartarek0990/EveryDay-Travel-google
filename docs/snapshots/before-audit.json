@@ -1,0 +1,42 @@
+{
+  "generatedAt": "2026-11-28T00:35:00.000Z",
+  "note": "Row counts only. Produced by the read-only audit (Phase B 3.1). No user data, no hashes, no secrets.",
+  "projectRef": "wcwivffgpxhqtjbwrnbb",
+  "migrations": {
+    "0001_init": "applied",
+    "0002_image_variants": "NOT applied"
+  },
+  "tables": {
+    "users": 1,
+    "sessions": 1,
+    "login_attempts": 1,
+    "images": 9,
+    "site_settings": 1,
+    "hero_images": 3,
+    "destinations": 6,
+    "trips": 3,
+    "trip_images": 6,
+    "itinerary_days": 9,
+    "optional_activities": 4,
+    "gallery_images": 6
+  },
+  "contentTotals": {
+    "images": 9,
+    "hero_images": 3,
+    "destinations": 6,
+    "trips": 3,
+    "trip_images": 6,
+    "itinerary_days": 9,
+    "optional_activities": 4,
+    "gallery_images": 6,
+    "site_settings": 1
+  },
+  "ownerExists": true,
+  "imagesWithoutVariants": 9,
+  "storage": {
+    "bucket": "site-images",
+    "exists": true,
+    "public": true,
+    "objects": 0
+  }
+}

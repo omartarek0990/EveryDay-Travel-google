@@ -18,6 +18,7 @@
     "create-owner": "tsx scripts/create-owner.ts",
     "reset-password": "tsx scripts/reset-password.ts",
     "snapshot:db": "tsx scripts/snapshot-db.ts",
+    "backup:db": "tsx scripts/backup-db.ts",
     "optimize:images": "tsx scripts/optimize-images.ts",
     "perf": "node scripts/perf.mjs",
     "verify:supabase": "tsx scripts/verify-supabase.ts"
